@@ -3,8 +3,8 @@ import {Alert, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native
 
 import {AuthClient} from './AuthClient';
 import CameraCapture from '../face/CameraCapture';
-import {EmbeddingEngine} from '../face/EmbeddingEngine';
-import {FaceCaptureSample, LivenessChecks} from '../face/LivenessChecks';
+import {EmbeddingEngine, FaceEmbedding, MultiPoseFaceProfile, PoseKey} from '../face/EmbeddingEngine';
+import {FaceCaptureSample} from '../face/LivenessChecks';
 import {MatchService} from '../face/MatchService';
 import {BiometricStore} from '../../security/BiometricStore';
 import {cyberTheme} from '../../theme/cyberTheme';
@@ -15,6 +15,14 @@ type LoginScreenProps = {
   onGoLive?: () => void;
   onLoginSuccess?: (username: string) => void;
 };
+
+const POSE_FLOW: Array<{key: PoseKey; label: string; instruction: string}> = [
+  {key: 'front', label: 'Front', instruction: 'Look straight at camera'},
+  {key: 'left', label: 'Left', instruction: 'Turn face slightly LEFT'},
+  {key: 'right', label: 'Right', instruction: 'Turn face slightly RIGHT'},
+  {key: 'up', label: 'Up', instruction: 'Lift chin UP slightly'},
+  {key: 'down', label: 'Down', instruction: 'Lower chin DOWN slightly'},
+];
 
 function buildAssertion(challengeId: string, nonce: string, bindingKeyId: string): string {
   let hash = 0;
@@ -27,11 +35,13 @@ function buildAssertion(challengeId: string, nonce: string, bindingKeyId: string
 
 function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
   const [busy, setBusy] = useState(false);
-  const [openPreviewToken, setOpenPreviewToken] = useState<number | undefined>(undefined);
-  const [captureRequestToken, setCaptureRequestToken] = useState<number | undefined>(undefined);
-  const [captureSample, setCaptureSample] = useState<FaceCaptureSample | null>(null);
-  const [captureMeta, setCaptureMeta] = useState('Camera stays off until you tap Login with Face.');
+  const [currentPoseIndex, setCurrentPoseIndex] = useState(0);
+  const [poseEmbeddings, setPoseEmbeddings] = useState<Partial<Record<PoseKey, FaceEmbedding>>>({});
+  const [captureMeta, setCaptureMeta] = useState('Tap Start Guided Login, then capture each pose: front, left, right, up, down.');
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const currentPose = POSE_FLOW[currentPoseIndex];
+  const allPosesCaptured = POSE_FLOW.every(item => Boolean(poseEmbeddings[item.key]));
 
   const clearAuthTimeout = () => {
     if (!authTimeoutRef.current) {
@@ -41,83 +51,49 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
     authTimeoutRef.current = null;
   };
 
-  const authenticateWithSample = async (sample: FaceCaptureSample) => {
+  const authenticateWithProfile = async (candidateProfile: MultiPoseFaceProfile) => {
     const binding = await BiometricStore.getDeviceBinding();
-    const enrolledTemplate = await BiometricStore.getTemplate();
-    if (!binding || !enrolledTemplate) {
+    const enrolledProfile = await BiometricStore.getTemplateProfile();
+    if (!binding || !enrolledProfile) {
       Alert.alert('Not enrolled', 'Enroll face login on this device first.');
       return;
     }
 
-    if (!sample.imageBase64) {
-      throw new Error('Image capture failed. Please retake the face photo.');
-    }
-
-    setCaptureMeta('Scanning face...');
-    const analysis = await AuthClient.analyzeFace(sample.imageBase64);
-    if (!analysis.face_detected) {
-      setCaptureMeta('Face not detected. Try better framing and lighting.');
-      throw new Error(analysis.message);
-    }
-
-    // Anti-spoofing: reject if backend texture analysis flags image as non-live
-    if (!analysis.is_live) {
-      setCaptureMeta(`Anti-spoofing check failed (score ${analysis.liveness_score.toFixed(2)}). Use a real live face.`);
-      throw new Error('Liveness check failed — photo or screen replay detected. Please look directly at the camera.');
-    }
-
     const challenge = await AuthClient.createChallenge(binding.username, binding.deviceId, 'face-primary');
-    const candidateTemplate = EmbeddingEngine.fromAnalysis(analysis.vector, analysis.template_hash);
-    const match = MatchService.compare(candidateTemplate, enrolledTemplate);
-    const liveness = LivenessChecks.evaluate(sample);
+    const match = MatchService.compareMultiPose(candidateProfile, enrolledProfile);
 
     if (!match.matched) {
-      setCaptureMeta(`Face not recognized (${match.similarity.toFixed(2)}).`);
-      throw new Error(`Face mismatch (similarity ${match.similarity.toFixed(2)}).`);
+      setCaptureMeta(`Match score ${match.score.toFixed(1)}%. Need at least 70%.`);
+      throw new Error(`Face mismatch. Match score ${match.score.toFixed(1)}% (required ≥ 70%).`);
     }
 
     const session = await AuthClient.verifyChallenge(
       challenge.challenge_id,
       binding.username,
       binding.deviceId,
-      match.matched && liveness.passed,
-      liveness.score,
+      true,
+      Math.min(1, match.score / 100),
       buildAssertion(challenge.challenge_id, challenge.nonce, binding.bindingKeyId),
     );
 
-    setCaptureMeta(`Face recognized as ${session.username}.`);
+    setCaptureMeta(`Face recognized. Match score ${match.score.toFixed(1)}% as ${session.username}.`);
     Alert.alert('Face login success', `Authenticated as ${session.username} via ${session.auth_method}.`);
     onLoginSuccess?.(session.username);
   };
 
-  const onFaceLogin = async () => {
-    if (busy) {
+  const onStartGuidedLogin = async () => {
+    if (busy || allPosesCaptured) {
       return;
     }
+    setCaptureMeta(`Capture ${currentPose.label} pose: ${currentPose.instruction}`);
+  };
 
-    setBusy(true);
-    setCaptureSample(null);
-    setCaptureMeta('Opening camera and capturing secure frame...');
-    try {
-      clearAuthTimeout();
-      // Open the camera preview immediately, then wait 2 s for the camera
-      // hardware to warm up before requesting a capture. Without this delay
-      // the first capture attempt fires before the Camera component has
-      // finished initialising its preview stream and always returns null.
-      setOpenPreviewToken(token => (token ?? 0) + 1);
-      setTimeout(() => {
-        setCaptureRequestToken(token => (token ?? 0) + 1);
-        // Total timeout = camera-warm-up delay + 15 s capture window
-        authTimeoutRef.current = setTimeout(() => {
-          setBusy(false);
-          setCaptureMeta('Face capture timed out. Please try again.');
-        }, 15000);
-      }, 2000);
-    } catch (error) {
-      clearAuthTimeout();
-      Alert.alert('Face login failed', error instanceof Error ? error.message : 'Unknown error');
-      setBusy(false);
-    }
+  const onResetGuidedLogin = () => {
+    setPoseEmbeddings({});
+    setCurrentPoseIndex(0);
+    setBusy(false);
+    clearAuthTimeout();
+    setCaptureMeta('Guided login reset. Capture front, left, right, up, and down poses.');
   };
 
   const onCaptureError = (message: string) => {
@@ -130,14 +106,47 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
 
   const onCaptureSampleReady = async (sample: FaceCaptureSample) => {
     clearAuthTimeout();
-    setCaptureSample(sample);
-    if (!busy) {
-      setCaptureMeta(`Secure frame captured • ${sample.captureId}.`);
+    if (!currentPose || busy) {
       return;
     }
 
+    if (!sample.imageBase64) {
+      Alert.alert('Capture failed', 'Image capture failed. Please retake this pose.');
+      return;
+    }
+
+    setBusy(true);
+
     try {
-      await authenticateWithSample(sample);
+      const analysis = await AuthClient.analyzeFace(sample.imageBase64);
+      if (!analysis.face_detected) {
+        throw new Error(`No face detected for ${currentPose.label} pose. ${analysis.message}`);
+      }
+      if (!analysis.is_live) {
+        throw new Error(`Liveness failed for ${currentPose.label} pose (score ${analysis.liveness_score.toFixed(2)}).`);
+      }
+
+      const embedding = EmbeddingEngine.fromAnalysis(analysis.vector, analysis.template_hash);
+      const nextEmbeddings = {...poseEmbeddings, [currentPose.key]: embedding};
+      setPoseEmbeddings(nextEmbeddings);
+
+      if (currentPoseIndex < POSE_FLOW.length - 1) {
+        setCurrentPoseIndex(index => index + 1);
+        setCaptureMeta(`Captured ${currentPose.label}. Next: ${POSE_FLOW[currentPoseIndex + 1].instruction}`);
+      } else {
+        const profile: MultiPoseFaceProfile = {
+          poses: {
+            front: nextEmbeddings.front!,
+            left: nextEmbeddings.left!,
+            right: nextEmbeddings.right!,
+            up: nextEmbeddings.up!,
+            down: nextEmbeddings.down!,
+          },
+          capturedAt: new Date().toISOString(),
+        };
+        setCaptureMeta('All poses captured. Verifying profile...');
+        await authenticateWithProfile(profile);
+      }
     } catch (error) {
       Alert.alert('Face login failed', error instanceof Error ? error.message : 'Unknown error');
     } finally {
@@ -168,12 +177,17 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
       <CameraCapture
         label="Biometric scan"
         disabled={busy}
-        openPreviewToken={openPreviewToken}
-        captureRequestToken={captureRequestToken}
-        actionsMode="none"
+        actionsMode="full"
         onCaptureSample={onCaptureSampleReady}
         onCaptureError={onCaptureError}
       />
+
+      <View style={styles.poseGuideCard}>
+        <Text style={styles.poseGuideLabel}>Current login pose</Text>
+        <Text style={styles.poseGuideTitle}>{currentPose ? currentPose.label.toUpperCase() : 'DONE'}</Text>
+        <Text style={styles.poseGuideHint}>{currentPose ? currentPose.instruction : 'All poses captured'}</Text>
+        <Text style={styles.poseGuideProgress}>{Object.keys(poseEmbeddings).length} / {POSE_FLOW.length} captured</Text>
+      </View>
 
       {/* ── Status Card ───────────────────────────────────── */}
       <View style={styles.statusCard}>
@@ -185,8 +199,12 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
       </View>
 
       {/* ── Primary Action ────────────────────────────────── */}
-      <Pressable style={[styles.primaryButton, busy && styles.buttonDisabled]} onPress={onFaceLogin} disabled={busy}>
-        <Text style={styles.primaryButtonText}>{busy ? 'Authenticating…' : 'Login with Face'}</Text>
+      <Pressable style={[styles.primaryButton, busy && styles.buttonDisabled]} onPress={onStartGuidedLogin} disabled={busy || allPosesCaptured}>
+        <Text style={styles.primaryButtonText}>{busy ? 'Processing...' : allPosesCaptured ? 'Poses complete' : 'Start Guided Login'}</Text>
+      </Pressable>
+
+      <Pressable style={[styles.resetButton, busy && styles.buttonDisabled]} onPress={onResetGuidedLogin} disabled={busy}>
+        <Text style={styles.resetButtonText}>Reset Poses</Text>
       </Pressable>
 
       {/* ── Secondary Action ──────────────────────────────── */}
@@ -349,6 +367,36 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontSize: 13,
   },
+  poseGuideCard: {
+    backgroundColor: cyberTheme.colors.surfaceHigh,
+    borderWidth: 1,
+    borderColor: cyberTheme.colors.border,
+    borderRadius: cyberTheme.radius.md,
+    padding: 12,
+    marginBottom: 14,
+  },
+  poseGuideLabel: {
+    color: cyberTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  poseGuideTitle: {
+    color: cyberTheme.colors.accent,
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  poseGuideHint: {
+    color: cyberTheme.colors.textSecondary,
+    marginTop: 2,
+  },
+  poseGuideProgress: {
+    color: cyberTheme.colors.accentGold,
+    marginTop: 6,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   // ── Buttons ───────────────────────────────────────────────
   primaryButton: {
     backgroundColor: cyberTheme.colors.accent,
@@ -385,6 +433,19 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.45,
+  },
+  resetButton: {
+    borderWidth: 1,
+    borderColor: cyberTheme.colors.border,
+    borderRadius: cyberTheme.radius.md,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+    backgroundColor: cyberTheme.colors.surfaceHigh,
+  },
+  resetButtonText: {
+    color: cyberTheme.colors.textSecondary,
+    fontWeight: '700',
   },
   // ── Divider ───────────────────────────────────────────────
   dividerRow: {

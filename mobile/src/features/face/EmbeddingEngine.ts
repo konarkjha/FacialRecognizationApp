@@ -4,6 +4,13 @@ export type FaceEmbedding = {
   capturedAt: string;
 };
 
+export type PoseKey = 'front' | 'left' | 'right' | 'up' | 'down';
+
+export type MultiPoseFaceProfile = {
+  poses: Record<PoseKey, FaceEmbedding>;
+  capturedAt: string;
+};
+
 function pseudoHash(input: string): string {
   let hash = 0;
   for (let index = 0; index < input.length; index += 1) {

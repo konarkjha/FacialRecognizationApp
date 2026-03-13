@@ -1,4 +1,4 @@
-import {FaceEmbedding} from './EmbeddingEngine';
+import {FaceEmbedding, MultiPoseFaceProfile, PoseKey} from './EmbeddingEngine';
 
 function cosineSimilarity(a: number[], b: number[]): number {
   const dot = a.reduce((sum, value, index) => sum + value * (b[index] ?? 0), 0);
@@ -31,6 +31,34 @@ export const MatchService = {
     return {
       matched: similarity >= 0.74 && distance <= 0.065,
       similarity,
+    };
+  },
+
+  compareMultiPose(candidate: MultiPoseFaceProfile, enrolled: MultiPoseFaceProfile): {matched: boolean; score: number; perPose: Record<PoseKey, number>} {
+    const keys: PoseKey[] = ['front', 'left', 'right', 'up', 'down'];
+    const perPose = {} as Record<PoseKey, number>;
+    let total = 0;
+
+    for (const key of keys) {
+      const cand = candidate.poses[key];
+      const base = enrolled.poses[key];
+      const similarity = cosineSimilarity(cand.vector, base.vector);
+      const distance = meanAbsoluteDistance(cand.vector, base.vector);
+
+      const simScore = Math.max(0, Math.min(1, (similarity - 0.50) / 0.40));
+      const distPenalty = Math.max(0, Math.min(1, (distance - 0.04) / 0.07));
+      const poseScore = Math.max(0, Math.min(1, simScore * (1 - 0.45 * distPenalty)));
+
+      perPose[key] = Number((poseScore * 100).toFixed(1));
+      total += poseScore;
+    }
+
+    const avg = total / keys.length;
+    const percent = Number((avg * 100).toFixed(1));
+    return {
+      matched: percent >= 70,
+      score: percent,
+      perPose,
     };
   },
 };

@@ -3,8 +3,8 @@ import {Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'r
 
 import {AuthClient} from './AuthClient';
 import CameraCapture from '../face/CameraCapture';
-import {EmbeddingEngine} from '../face/EmbeddingEngine';
-import {FaceCaptureSample, LivenessChecks} from '../face/LivenessChecks';
+import {EmbeddingEngine, FaceEmbedding, MultiPoseFaceProfile, PoseKey} from '../face/EmbeddingEngine';
+import {FaceCaptureSample} from '../face/LivenessChecks';
 import {BiometricStore} from '../../security/BiometricStore';
 import {cyberTheme} from '../../theme/cyberTheme';
 
@@ -23,6 +23,14 @@ type CyberInputProps = {
   onChangeText: (value: string) => void;
   secureTextEntry?: boolean;
 };
+
+const POSE_FLOW: Array<{key: PoseKey; label: string; instruction: string}> = [
+  {key: 'front', label: 'Front', instruction: 'Look straight at the camera'},
+  {key: 'left', label: 'Left', instruction: 'Turn your face slightly LEFT'},
+  {key: 'right', label: 'Right', instruction: 'Turn your face slightly RIGHT'},
+  {key: 'up', label: 'Up', instruction: 'Lift your chin a little UP'},
+  {key: 'down', label: 'Down', instruction: 'Lower your chin a little DOWN'},
+];
 
 function CyberInput({label, value, onChangeText, secureTextEntry}: CyberInputProps) {
   const [focused, setFocused] = useState(false);
@@ -51,8 +59,49 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
   const [password, setPassword] = useState('');
   const [deviceName, setDeviceName] = useState('Android Demo Device');
   const [busy, setBusy] = useState(false);
-  const [captureSample, setCaptureSample] = useState<FaceCaptureSample | null>(null);
+  const [currentPoseIndex, setCurrentPoseIndex] = useState(0);
+  const [poseEmbeddings, setPoseEmbeddings] = useState<Partial<Record<PoseKey, FaceEmbedding>>>({});
+  const [captureStatus, setCaptureStatus] = useState('Capture all 5 guided poses to create your face profile.');
   const enrollInFlightRef = useRef(false);
+
+  const currentPose = POSE_FLOW[currentPoseIndex];
+  const allPosesCaptured = POSE_FLOW.every(item => Boolean(poseEmbeddings[item.key]));
+
+  const onPoseCaptured = async (sample: FaceCaptureSample) => {
+    if (!currentPose || busy) {
+      return;
+    }
+
+    if (!sample.imageBase64) {
+      Alert.alert('Capture failed', 'Image capture failed. Please retake this pose.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const analysis = await AuthClient.analyzeFace(sample.imageBase64);
+      if (!analysis.face_detected) {
+        throw new Error(`No face detected for ${currentPose.label} pose. ${analysis.message}`);
+      }
+      if (!analysis.is_live) {
+        throw new Error(`Liveness check failed on ${currentPose.label} pose (score ${analysis.liveness_score.toFixed(2)}).`);
+      }
+
+      const embedding = EmbeddingEngine.fromAnalysis(analysis.vector, analysis.template_hash);
+      setPoseEmbeddings(prev => ({...prev, [currentPose.key]: embedding}));
+
+      if (currentPoseIndex < POSE_FLOW.length - 1) {
+        setCurrentPoseIndex(index => index + 1);
+        setCaptureStatus(`Captured ${currentPose.label} pose. Next: ${POSE_FLOW[currentPoseIndex + 1].instruction}`);
+      } else {
+        setCaptureStatus('All 5 poses captured. You can now enroll face login.');
+      }
+    } catch (error) {
+      Alert.alert('Capture invalid', error instanceof Error ? error.message : 'Unknown error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onEnroll = async () => {
     if (enrollInFlightRef.current) {
@@ -69,13 +118,8 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
         throw new Error('Enter a fallback PIN/password before enrollment');
       }
 
-      if (!captureSample) {
-        throw new Error('Capture a live face sample before enrollment');
-      }
-
-      const liveness = LivenessChecks.evaluate(captureSample);
-      if (!liveness.passed) {
-        throw new Error(`Liveness check failed: ${liveness.reasons.join(', ')}`);
+      if (!allPosesCaptured) {
+        throw new Error('Capture all guided poses (Front, Left, Right, Up, Down) before enrollment');
       }
 
       const deviceId = `android-${normalizedUsername}`;
@@ -92,9 +136,9 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
       }
 
       const localBinding = await BiometricStore.getDeviceBinding();
-      const localTemplate = await BiometricStore.getTemplate();
+      const localProfile = await BiometricStore.getTemplateProfile();
       const localAlreadyEnrolled =
-        localBinding?.username === normalizedUsername && localBinding?.deviceId === deviceId && Boolean(localTemplate);
+        localBinding?.username === normalizedUsername && localBinding?.deviceId === deviceId && Boolean(localProfile);
 
       if (localAlreadyEnrolled || serverFaceEnrolled) {
         try {
@@ -115,28 +159,26 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
         }
       }
 
-      if (!captureSample.imageBase64) {
-        throw new Error('Image capture failed. Please retake the face photo.');
-      }
+      const profile: MultiPoseFaceProfile = {
+        poses: {
+          front: poseEmbeddings.front!,
+          left: poseEmbeddings.left!,
+          right: poseEmbeddings.right!,
+          up: poseEmbeddings.up!,
+          down: poseEmbeddings.down!,
+        },
+        capturedAt: new Date().toISOString(),
+      };
 
-      const analysis = await AuthClient.analyzeFace(captureSample.imageBase64);
-      if (!analysis.face_detected) {
-        throw new Error(analysis.message);
-      }
-
-      // Anti-spoofing: block enrollment from photos or screen replays
-      if (!analysis.is_live) {
-        throw new Error(`Anti-spoofing check failed (score ${analysis.liveness_score.toFixed(2)}). Enroll using a real live face — do not use a photo or screen image.`);
-      }
-
-      const template = EmbeddingEngine.fromAnalysis(analysis.vector, analysis.template_hash);
+      const frontTemplate = profile.poses.front;
 
       if (!serverHasUser) {
         await AuthClient.registerUser(normalizedUsername, password, normalizedUsername);
       }
 
-      await AuthClient.enrollDevice(normalizedUsername, deviceId, deviceName, bindingKeyId, analysis.vector);
-      await BiometricStore.saveTemplate(template);
+      await AuthClient.enrollDevice(normalizedUsername, deviceId, deviceName, bindingKeyId, frontTemplate.vector);
+      await BiometricStore.saveTemplate(frontTemplate);
+      await BiometricStore.saveTemplateProfile(profile);
       await BiometricStore.saveDeviceBinding({
         deviceId,
         deviceName,
@@ -144,7 +186,7 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
         username: normalizedUsername,
       });
 
-      Alert.alert('Enrollment complete', 'Face template and device binding were stored on this device.');
+      Alert.alert('Enrollment complete', '5-pose face profile and device binding were stored on this device.');
     } catch (error) {
       Alert.alert('Enrollment failed', error instanceof Error ? error.message : 'Unknown error');
     } finally {
@@ -168,7 +210,7 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
       <View style={styles.stepsRow}>
         {['Scan', 'Identity', 'Secure'].map((s, i) => (
           <View key={s} style={styles.stepPill}>
-            <View style={[styles.stepNumber, i === 0 && captureSample && styles.stepNumberDone, i === 1 && username.length > 2 && styles.stepNumberDone]}>
+            <View style={[styles.stepNumber, i === 0 && allPosesCaptured && styles.stepNumberDone, i === 1 && username.length > 2 && styles.stepNumberDone]}>
               <Text style={styles.stepNumberText}>{i + 1}</Text>
             </View>
             <Text style={styles.stepLabel}>{s}</Text>
@@ -176,14 +218,23 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
         ))}
       </View>
 
+      <View style={styles.poseGuideCard}>
+        <Text style={styles.poseGuideLabel}>Current pose</Text>
+        <Text style={styles.poseGuideTitle}>{currentPose ? currentPose.label.toUpperCase() : 'DONE'}</Text>
+        <Text style={styles.poseGuideHint}>{currentPose ? currentPose.instruction : 'All poses captured'}</Text>
+        <Text style={styles.poseGuideProgress}>
+          {Object.keys(poseEmbeddings).length} / {POSE_FLOW.length} captured
+        </Text>
+      </View>
+
       {/* ── Camera ──────────────────────────────────────── */}
-      <CameraCapture label="Biometric scan" onCaptureSample={setCaptureSample} disabled={busy} />
+      <CameraCapture label="Biometric scan" onCaptureSample={onPoseCaptured} disabled={busy || allPosesCaptured} actionsMode="full" />
 
       {/* ── Sample status ───────────────────────────────── */}
-      <View style={[styles.sampleStatus, captureSample && styles.sampleStatusReady]}>
-        <View style={[styles.sampleDot, captureSample && styles.sampleDotReady]} />
-        <Text style={[styles.sampleStatusText, captureSample && styles.sampleStatusTextReady]}>
-          {captureSample ? `Face sample captured  ✓` : 'No face sample yet — tap camera above'}
+      <View style={[styles.sampleStatus, allPosesCaptured && styles.sampleStatusReady]}>
+        <View style={[styles.sampleDot, allPosesCaptured && styles.sampleDotReady]} />
+        <Text style={[styles.sampleStatusText, allPosesCaptured && styles.sampleStatusTextReady]}>
+          {captureStatus}
         </Text>
       </View>
 
@@ -300,6 +351,36 @@ const styles = StyleSheet.create({
     color: cyberTheme.colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
+  },
+  poseGuideCard: {
+    backgroundColor: cyberTheme.colors.surfaceHigh,
+    borderColor: cyberTheme.colors.border,
+    borderWidth: 1,
+    borderRadius: cyberTheme.radius.md,
+    padding: 12,
+    marginBottom: 14,
+  },
+  poseGuideLabel: {
+    color: cyberTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  poseGuideTitle: {
+    color: cyberTheme.colors.accent,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  poseGuideHint: {
+    color: cyberTheme.colors.textSecondary,
+    marginTop: 2,
+  },
+  poseGuideProgress: {
+    color: cyberTheme.colors.accentGold,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 6,
   },
   // ── Sample status ─────────────────────────────────────────
   sampleStatus: {

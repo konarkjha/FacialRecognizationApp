@@ -390,7 +390,7 @@ function CameraCapture({
 
               {/* ── Flip camera button ───────────────────────── */}
               <Pressable style={styles.flipButton} onPress={flipCamera} disabled={disabled}>
-                <Text style={styles.flipIcon}>⟳</Text>
+                <Text style={styles.flipButtonText}>Rotate camera</Text>
               </Pressable>
 
               {/* ── Liveness challenge overlay ───────────────── */}
@@ -637,20 +637,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 10,
     right: 10,
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    borderRadius: 14,
     backgroundColor: 'rgba(0,212,255,0.15)',
     borderWidth: 1.5,
     borderColor: cyberTheme.colors.accent,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  flipIcon: {
+  flipButtonText: {
     color: cyberTheme.colors.accent,
-    fontSize: 20,
-    fontWeight: '800',
-    lineHeight: 26,
+    fontSize: 11,
+    fontWeight: '700',
   },
   challengeOverlay: {
     position: 'absolute',
