@@ -16,6 +16,7 @@ class DeviceRecord:
     binding_key_id: str
     enrolled_at: datetime
     face_vector: Optional[List[float]] = None
+    face_vectors: Optional[Dict[str, List[float]]] = None
 
 
 @dataclass
@@ -92,6 +93,7 @@ def _init_db() -> None:
                 binding_key_id TEXT NOT NULL,
                 enrolled_at TEXT NOT NULL,
                 face_vector TEXT,
+                face_vectors TEXT,
                 PRIMARY KEY (username, device_id),
                 FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
             )
@@ -101,6 +103,8 @@ def _init_db() -> None:
         existing_cols = [row[1] for row in connection.execute("PRAGMA table_info(devices)").fetchall()]
         if "face_vector" not in existing_cols:
             connection.execute("ALTER TABLE devices ADD COLUMN face_vector TEXT")
+        if "face_vectors" not in existing_cols:
+            connection.execute("ALTER TABLE devices ADD COLUMN face_vectors TEXT")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS challenges (
@@ -142,7 +146,7 @@ def get_user(username: str) -> Optional[UserRecord]:
 
         device_rows = connection.execute(
             """
-            SELECT device_id, device_name, binding_key_id, enrolled_at, face_vector
+            SELECT device_id, device_name, binding_key_id, enrolled_at, face_vector, face_vectors
             FROM devices
             WHERE username = ?
             """,
@@ -153,12 +157,15 @@ def get_user(username: str) -> Optional[UserRecord]:
     for row in device_rows:
         raw_vec = row["face_vector"]
         face_vector = json.loads(raw_vec) if raw_vec else None
+        raw_vecs = row["face_vectors"]
+        face_vectors = json.loads(raw_vecs) if raw_vecs else None
         device = DeviceRecord(
             device_id=row["device_id"],
             device_name=row["device_name"],
             binding_key_id=row["binding_key_id"],
             enrolled_at=_from_iso(row["enrolled_at"]),
             face_vector=face_vector,
+            face_vectors=face_vectors,
         )
         devices[device.device_id] = device
 
@@ -187,10 +194,11 @@ def save_user(user: UserRecord) -> UserRecord:
         connection.execute("DELETE FROM devices WHERE username = ?", (normalized,))
         for device in user.devices.values():
             vec_json = json.dumps(device.face_vector) if device.face_vector else None
+            vecs_json = json.dumps(device.face_vectors) if device.face_vectors else None
             connection.execute(
                 """
-                INSERT INTO devices (username, device_id, device_name, binding_key_id, enrolled_at, face_vector)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO devices (username, device_id, device_name, binding_key_id, enrolled_at, face_vector, face_vectors)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     normalized,
@@ -199,6 +207,7 @@ def save_user(user: UserRecord) -> UserRecord:
                     device.binding_key_id,
                     _to_iso(device.enrolled_at),
                     vec_json,
+                    vecs_json,
                 ),
             )
         connection.commit()
@@ -292,7 +301,7 @@ def list_all_users() -> list[UserRecord]:
             "SELECT username, password_hash, display_name FROM users ORDER BY username"
         ).fetchall()
         device_rows = connection.execute(
-            "SELECT username, device_id, device_name, binding_key_id, enrolled_at, face_vector FROM devices ORDER BY username, enrolled_at"
+            "SELECT username, device_id, device_name, binding_key_id, enrolled_at, face_vector, face_vectors FROM devices ORDER BY username, enrolled_at"
         ).fetchall()
 
     devices_by_user: Dict[str, Dict[str, DeviceRecord]] = {}
@@ -300,12 +309,15 @@ def list_all_users() -> list[UserRecord]:
         bucket = devices_by_user.setdefault(row["username"], {})
         raw_vec = row["face_vector"]
         face_vector = json.loads(raw_vec) if raw_vec else None
+        raw_vecs = row["face_vectors"]
+        face_vectors = json.loads(raw_vecs) if raw_vecs else None
         bucket[row["device_id"]] = DeviceRecord(
             device_id=row["device_id"],
             device_name=row["device_name"],
             binding_key_id=row["binding_key_id"],
             enrolled_at=_from_iso(row["enrolled_at"]),
             face_vector=face_vector,
+            face_vectors=face_vectors,
         )
 
     result = []
@@ -325,9 +337,19 @@ def list_all_face_vectors() -> list[tuple[str, str, list[float]]]:
     """Return (username, device_id, face_vector) for all enrolled devices that have a stored vector."""
     with _connect() as connection:
         rows = connection.execute(
-            "SELECT username, device_id, face_vector FROM devices WHERE face_vector IS NOT NULL"
+            "SELECT username, device_id, face_vector, face_vectors FROM devices WHERE face_vector IS NOT NULL OR face_vectors IS NOT NULL"
         ).fetchall()
-    return [(row["username"], row["device_id"], json.loads(row["face_vector"])) for row in rows]
+    result: list[tuple[str, str, list[float]]] = []
+    for row in rows:
+        if row["face_vector"]:
+            result.append((row["username"], row["device_id"], json.loads(row["face_vector"])))
+            continue
+        if row["face_vectors"]:
+            vecs = json.loads(row["face_vectors"])
+            front = vecs.get("front") if isinstance(vecs, dict) else None
+            if front:
+                result.append((row["username"], row["device_id"], front))
+    return result
 
 
 def list_active_sessions() -> list[SessionRecord]:

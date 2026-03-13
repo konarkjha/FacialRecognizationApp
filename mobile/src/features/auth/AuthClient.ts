@@ -61,10 +61,24 @@ export const AuthClient = {
       body: JSON.stringify({username, password, display_name: displayName}),
     }),
 
-  enrollDevice: (username: string, deviceId: string, deviceName: string, bindingKeyId: string, faceVector?: number[]) =>
+  enrollDevice: (
+    username: string,
+    deviceId: string,
+    deviceName: string,
+    bindingKeyId: string,
+    faceVector?: number[],
+    faceVectors?: Record<string, number[]>,
+  ) =>
     request<{message: string}>('/auth/enroll-device', {
       method: 'POST',
-      body: JSON.stringify({username, device_id: deviceId, device_name: deviceName, binding_key_id: bindingKeyId, face_vector: faceVector ?? null}),
+      body: JSON.stringify({
+        username,
+        device_id: deviceId,
+        device_name: deviceName,
+        binding_key_id: bindingKeyId,
+        face_vector: faceVector ?? null,
+        face_vectors: faceVectors ?? null,
+      }),
     }),
 
   passwordLogin: (username: string, password: string) =>
@@ -101,6 +115,8 @@ export const AuthClient = {
     livenessScore: number,
     clientAssertion: string,
     fallbackUsed = false,
+    candidatePoseVectors?: Record<string, number[]>,
+    minimumMatchScore = 70,
   ) =>
     request<SessionResponse>('/auth/verify', {
       method: 'POST',
@@ -112,6 +128,8 @@ export const AuthClient = {
         liveness_score: livenessScore,
         client_assertion: clientAssertion,
         fallback_used: fallbackUsed,
+        candidate_pose_vectors: candidatePoseVectors ?? null,
+        minimum_match_score: minimumMatchScore,
       }),
     }),
 };

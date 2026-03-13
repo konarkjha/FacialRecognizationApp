@@ -26,6 +26,48 @@ from .store import DeviceRecord, UserRecord, get_challenge, get_user, list_all_f
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+POSE_KEYS = ("front", "left", "right", "up", "down")
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    import math
+    if not a or not b:
+        return 0.0
+    pairs = min(len(a), len(b))
+    dot = sum(float(a[i]) * float(b[i]) for i in range(pairs))
+    mag_a = math.sqrt(sum(float(v) * float(v) for v in a)) or 1e-9
+    mag_b = math.sqrt(sum(float(v) * float(v) for v in b)) or 1e-9
+    return float(dot / (mag_a * mag_b))
+
+
+def _mean_abs_distance(a: list[float], b: list[float]) -> float:
+    if not a or not b:
+        return 1.0
+    pairs = min(len(a), len(b))
+    return sum(abs(float(a[i]) - float(b[i])) for i in range(pairs)) / float(pairs)
+
+
+def _compute_multi_pose_score(candidate: dict[str, list[float]], enrolled: dict[str, list[float]]) -> float:
+    total = 0.0
+    count = 0
+    for key in POSE_KEYS:
+        c = candidate.get(key)
+        e = enrolled.get(key)
+        if not c or not e:
+            continue
+        similarity = _cosine_similarity(c, e)
+        distance = _mean_abs_distance(c, e)
+        sim_score = max(0.0, min(1.0, (similarity - 0.50) / 0.40))
+        dist_penalty = max(0.0, min(1.0, (distance - 0.04) / 0.07))
+        pose_score = max(0.0, min(1.0, sim_score * (1.0 - 0.45 * dist_penalty)))
+        total += pose_score
+        count += 1
+
+    if count == 0:
+        return 0.0
+    return round((total / float(count)) * 100.0, 2)
+
+
 @router.post("/analyze-face", response_model=FaceAnalyzeResponse)
 def analyze_face(payload: FaceAnalyzeRequest) -> FaceAnalyzeResponse:
     try:
@@ -89,9 +131,13 @@ def enroll_device(payload: DeviceEnrollmentRequest) -> ApiMessage:
 
     # Duplicate-face check: compare incoming vector against every stored vector.
     # Similarity > 0.65 (SFace cosine threshold) means the same physical face.
-    if payload.face_vector:
+    dedup_vector = payload.face_vector
+    if dedup_vector is None and payload.face_vectors:
+        dedup_vector = payload.face_vectors.get("front")
+
+    if dedup_vector:
         import math
-        new_vec = payload.face_vector
+        new_vec = dedup_vector
         norm_new = math.sqrt(sum(v * v for v in new_vec)) or 1e-9
         for existing_username, _dev_id, stored_vec in list_all_face_vectors():
             if existing_username == payload.username:
@@ -110,7 +156,8 @@ def enroll_device(payload: DeviceEnrollmentRequest) -> ApiMessage:
         device_name=payload.device_name,
         binding_key_id=payload.binding_key_id,
         enrolled_at=datetime.now(timezone.utc),
-        face_vector=payload.face_vector,
+        face_vector=payload.face_vector or (payload.face_vectors.get("front") if payload.face_vectors else None),
+        face_vectors=payload.face_vectors,
     )
     save_user(user)
     return ApiMessage(message="Device enrolled for face login")
@@ -176,12 +223,17 @@ def verify_face_login(payload: ChallengeVerifyRequest) -> SessionResponse:
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge not found")
 
+    server_face_match = payload.face_match
+    if payload.candidate_pose_vectors and device.face_vectors:
+        score = _compute_multi_pose_score(payload.candidate_pose_vectors, device.face_vectors)
+        server_face_match = score >= payload.minimum_match_score
+
     verified = verify_challenge_response(
         user=user,
         device=device,
         challenge_id=payload.challenge_id,
         client_assertion=payload.client_assertion,
-        face_match=payload.face_match,
+        face_match=server_face_match,
         liveness_score=payload.liveness_score,
     )
     if not verified:

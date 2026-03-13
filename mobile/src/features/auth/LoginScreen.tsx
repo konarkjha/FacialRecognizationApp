@@ -61,6 +61,13 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
 
     const challenge = await AuthClient.createChallenge(binding.username, binding.deviceId, 'face-primary');
     const match = MatchService.compareMultiPose(candidateProfile, enrolledProfile);
+    const candidatePoseVectors = {
+      front: candidateProfile.poses.front.vector,
+      left: candidateProfile.poses.left.vector,
+      right: candidateProfile.poses.right.vector,
+      up: candidateProfile.poses.up.vector,
+      down: candidateProfile.poses.down.vector,
+    };
 
     if (!match.matched) {
       setCaptureMeta(`Match score ${match.score.toFixed(1)}%. Need at least 70%.`);
@@ -74,6 +81,9 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
       true,
       Math.min(1, match.score / 100),
       buildAssertion(challenge.challenge_id, challenge.nonce, binding.bindingKeyId),
+      false,
+      candidatePoseVectors,
+      70,
     );
 
     setCaptureMeta(`Face recognized. Match score ${match.score.toFixed(1)}% as ${session.username}.`);

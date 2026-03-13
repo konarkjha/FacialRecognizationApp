@@ -171,12 +171,19 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
       };
 
       const frontTemplate = profile.poses.front;
+      const faceVectors = {
+        front: profile.poses.front.vector,
+        left: profile.poses.left.vector,
+        right: profile.poses.right.vector,
+        up: profile.poses.up.vector,
+        down: profile.poses.down.vector,
+      };
 
       if (!serverHasUser) {
         await AuthClient.registerUser(normalizedUsername, password, normalizedUsername);
       }
 
-      await AuthClient.enrollDevice(normalizedUsername, deviceId, deviceName, bindingKeyId, frontTemplate.vector);
+      await AuthClient.enrollDevice(normalizedUsername, deviceId, deviceName, bindingKeyId, frontTemplate.vector, faceVectors);
       await BiometricStore.saveTemplate(frontTemplate);
       await BiometricStore.saveTemplateProfile(profile);
       await BiometricStore.saveDeviceBinding({

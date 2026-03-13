@@ -22,6 +22,7 @@ class DeviceEnrollmentRequest(BaseModel):
     device_name: str = Field(min_length=2, max_length=64)
     binding_key_id: str = Field(min_length=3, max_length=128)
     face_vector: Optional[list[float]] = Field(default=None, description="SFace embedding vector for duplicate-face detection")
+    face_vectors: Optional[dict[str, list[float]]] = Field(default=None, description="Multi-pose vectors: front,left,right,up,down")
 
 
 class PasswordLoginRequest(BaseModel):
@@ -43,6 +44,8 @@ class ChallengeVerifyRequest(BaseModel):
     liveness_score: float = Field(ge=0.0, le=1.0)
     client_assertion: str = Field(min_length=4, max_length=1024)
     fallback_used: bool = False
+    candidate_pose_vectors: Optional[dict[str, list[float]]] = Field(default=None, description="Live-captured multi-pose vectors for server-side score")
+    minimum_match_score: float = Field(default=70.0, ge=0.0, le=100.0)
 
 
 class FaceAnalyzeRequest(BaseModel):
