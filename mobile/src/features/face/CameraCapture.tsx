@@ -13,19 +13,11 @@ import RNFS from 'react-native-fs';
 import {Camera, CameraType} from 'react-native-camera-kit';
 
 import {FaceCaptureSample} from './LivenessChecks';
+import {AuthClient} from '../auth/AuthClient';
 import {cyberTheme} from '../../theme/cyberTheme';
 
 const LIVENESS_CHALLENGES = ['BLINK', 'SMILE', 'NOD YOUR HEAD', 'LOOK LEFT', 'LOOK RIGHT'] as const;
 type LivenessChallenge = (typeof LIVENESS_CHALLENGES)[number];
-
-/** Sample N bytes at equally-spaced positions — two identical photos give identical strings */
-function sampleBase64(b64: string, points = 160): string {
-  if (b64.length < points) {
-    return b64;
-  }
-  const step = Math.floor(b64.length / points);
-  return Array.from({length: points}, (_, i) => b64[i * step]).join('');
-}
 
 type CameraCaptureProps = {
   label: string;
@@ -196,11 +188,16 @@ function CameraCapture({
         return;
       }
 
-      // Motion detection: compare sampled bytes from both frames.
-      // A static photo/screen will produce byte-identical samples; a live face won't.
-      const sample1 = sampleBase64(frame1.base64);
-      const sample2 = sampleBase64(frame2.base64);
-      const livenessMotionDetected = sample1 !== sample2;
+      // Motion detection: send BOTH frames to backend for real pixel-diff analysis.
+      // Base64 comparison was unreliable because JPEG metadata always differs per capture.
+      let livenessMotionDetected = false;
+      try {
+        const motionResult = await AuthClient.checkMotion(frame1.base64, frame2.base64);
+        livenessMotionDetected = motionResult.motion_detected;
+      } catch {
+        // If server unreachable, fall back to permissive (don't block the user)
+        livenessMotionDetected = true;
+      }
 
       const brightnessGuess = Math.min(0.95, Math.max(0.45, 0.55 + faceCount * 0.05));
       const sample: FaceCaptureSample = {
@@ -355,6 +352,7 @@ function CameraCapture({
               ref={cameraRef}
               style={styles.camera}
               cameraType={cameraFacing}
+              key={cameraFacing}
               flashMode="off"
               focusMode="on"
               zoomMode="off"
@@ -429,56 +427,63 @@ function CameraCapture({
 const styles = StyleSheet.create({
   container: {
     backgroundColor: cyberTheme.colors.surface,
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 16,
+    borderRadius: cyberTheme.radius.lg,
+    padding: cyberTheme.spacing.cardInner,
+    marginBottom: 18,
     borderWidth: 1,
-    borderColor: '#1d2838',
-    shadowColor: '#39FF14',
+    borderColor: cyberTheme.colors.border,
+    shadowColor: '#00D4FF',
     shadowOffset: {width: 0, height: 0},
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 10,
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   title: {
     color: cyberTheme.colors.textPrimary,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
+    letterSpacing: 0.3,
   },
   badge: {
-    color: '#9efc8f',
+    color: cyberTheme.colors.accent,
     borderWidth: 1,
-    borderColor: '#2aa40f',
-    backgroundColor: '#0f2a12',
+    borderColor: cyberTheme.colors.accent,
+    backgroundColor: '#00D4FF18',
     borderRadius: 999,
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    fontSize: 11,
-    fontWeight: '700',
+    paddingVertical: 3,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
   },
   status: {
     color: cyberTheme.colors.accent,
     marginTop: 10,
     marginBottom: 10,
-    fontWeight: '700',
+    fontWeight: '600',
+    fontSize: 13,
+    letterSpacing: 0.2,
   },
   preview: {
     width: '100%',
-    height: 220,
-    borderRadius: 12,
+    height: 240,
+    borderRadius: cyberTheme.radius.md,
     overflow: 'hidden',
-    backgroundColor: '#07090F',
-    borderWidth: 1,
-    borderColor: '#1e293b',
+    backgroundColor: '#030509',
+    borderWidth: 1.5,
+    borderColor: cyberTheme.colors.border,
   },
   previewFailure: {
     borderColor: cyberTheme.colors.danger,
+    shadowColor: cyberTheme.colors.danger,
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
   },
   camera: {
     flex: 1,
@@ -489,146 +494,168 @@ const styles = StyleSheet.create({
   },
   corner: {
     position: 'absolute',
-    width: 28,
-    height: 28,
+    width: 22,
+    height: 22,
     borderColor: cyberTheme.colors.accent,
   },
   cornerTopLeft: {
-    top: 18,
-    left: 18,
-    borderTopWidth: 3,
-    borderLeftWidth: 3,
+    top: 16,
+    left: 16,
+    borderTopWidth: 2.5,
+    borderLeftWidth: 2.5,
+    borderTopLeftRadius: 3,
   },
   cornerTopRight: {
-    top: 18,
-    right: 18,
-    borderTopWidth: 3,
-    borderRightWidth: 3,
+    top: 16,
+    right: 16,
+    borderTopWidth: 2.5,
+    borderRightWidth: 2.5,
+    borderTopRightRadius: 3,
   },
   cornerBottomLeft: {
-    bottom: 18,
-    left: 18,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
+    bottom: 16,
+    left: 16,
+    borderBottomWidth: 2.5,
+    borderLeftWidth: 2.5,
+    borderBottomLeftRadius: 3,
   },
   cornerBottomRight: {
-    bottom: 18,
-    right: 18,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
+    bottom: 16,
+    right: 16,
+    borderBottomWidth: 2.5,
+    borderRightWidth: 2.5,
+    borderBottomRightRadius: 3,
   },
   scanLine: {
-    marginTop: 16,
+    marginTop: 20,
     marginHorizontal: 22,
-    height: 2,
+    height: 1.5,
     backgroundColor: cyberTheme.colors.accent,
     shadowColor: cyberTheme.colors.accent,
-    shadowOpacity: 0.8,
-    shadowRadius: 8,
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
   },
   faceBox: {
     position: 'absolute',
-    top: '30%',
-    left: '28%',
-    width: '44%',
-    height: '44%',
-    borderWidth: 2,
-    borderColor: '#7CFF65',
-    borderRadius: 10,
+    top: '27%',
+    left: '26%',
+    width: '48%',
+    height: '48%',
+    borderWidth: 1.5,
+    borderColor: cyberTheme.colors.accentGreen,
+    borderRadius: 8,
   },
   permissionState: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
+    gap: 8,
   },
   permissionTitle: {
     color: cyberTheme.colors.textPrimary,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    marginBottom: 6,
+    textAlign: 'center',
   },
   permissionHint: {
     color: cyberTheme.colors.textSecondary,
     textAlign: 'center',
+    fontSize: 13,
+    lineHeight: 20,
   },
   actions: {
     gap: 10,
   },
   button: {
-    backgroundColor: '#173420',
-    borderWidth: 1,
-    borderColor: '#39FF14',
-    borderRadius: 12,
+    backgroundColor: '#00D4FF14',
+    borderWidth: 1.5,
+    borderColor: cyberTheme.colors.accent,
+    borderRadius: cyberTheme.radius.md,
     padding: 13,
     alignItems: 'center',
   },
   buttonSecondary: {
-    backgroundColor: '#39FF14',
-    borderRadius: 12,
+    backgroundColor: cyberTheme.colors.accent,
+    borderRadius: cyberTheme.radius.md,
     padding: 13,
     alignItems: 'center',
-    ...cyberTheme.shadow.glow,
+    shadowColor: '#00D4FF',
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    shadowOffset: {width: 0, height: 0},
+    elevation: 12,
   },
   buttonDisabled: {
-    opacity: 0.5,
+    opacity: 0.45,
   },
   buttonText: {
-    color: '#b7ffab',
+    color: cyberTheme.colors.accent,
     fontWeight: '700',
+    fontSize: 14,
+    letterSpacing: 0.3,
   },
   buttonSecondaryText: {
-    color: '#041a08',
-    fontWeight: '700',
+    color: '#020B12',
+    fontWeight: '800',
+    fontSize: 14,
+    letterSpacing: 0.3,
   },
   flipButton: {
     position: 'absolute',
-    bottom: 12,
-    right: 12,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderWidth: 1,
+    bottom: 10,
+    right: 10,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(0,212,255,0.15)',
+    borderWidth: 1.5,
     borderColor: cyberTheme.colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   flipIcon: {
     color: cyberTheme.colors.accent,
-    fontSize: 22,
-    fontWeight: '700',
-    lineHeight: 28,
+    fontSize: 20,
+    fontWeight: '800',
+    lineHeight: 26,
   },
   challengeOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0,0,0,0.72)',
-    paddingVertical: 10,
+    backgroundColor: 'rgba(6,8,15,0.85)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     alignItems: 'center',
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
+    borderBottomLeftRadius: cyberTheme.radius.md,
+    borderBottomRightRadius: cyberTheme.radius.md,
+    borderTopWidth: 1,
+    borderTopColor: '#7B5CF044',
   },
   challengeLabel: {
-    color: '#9efc8f',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 2,
-    marginBottom: 2,
+    color: cyberTheme.colors.accentViolet,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 2.5,
+    marginBottom: 3,
+    textTransform: 'uppercase',
   },
   challengeAction: {
-    color: '#ffffff',
-    fontSize: 20,
+    color: cyberTheme.colors.textPrimary,
+    fontSize: 22,
     fontWeight: '900',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
   },
   challengeCountdown: {
-    color: cyberTheme.colors.accent,
-    fontSize: 26,
+    color: cyberTheme.colors.accentGold,
+    fontSize: 28,
     fontWeight: '900',
     marginTop: 2,
+    shadowColor: '#F7B731',
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
   },
 });
 

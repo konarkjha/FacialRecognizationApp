@@ -154,34 +154,62 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Enroll Face</Text>
-      <Text style={styles.subtitle}>Bind this device to your biometric profile with secure on-device templates.</Text>
-
-      <CameraCapture label="Enrollment capture" onCaptureSample={setCaptureSample} disabled={busy} />
-      <View style={styles.noteBox}>
-        <Text style={styles.noteTitle}>Capture status</Text>
-        <Text style={styles.noteCopy}>{captureSample ? `Sample ready at ${captureSample.capturedAt}` : 'No live sample captured yet.'}</Text>
+    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      {/* ── Header ──────────────────────────────────────── */}
+      <View style={styles.header}>
+        <View style={styles.headerIconWrap}>
+          <Text style={styles.headerIcon}>◈</Text>
+        </View>
+        <Text style={styles.title}>Create Account</Text>
+        <Text style={styles.subtitle}>Bind your face to this device with zero-knowledge biometrics</Text>
       </View>
 
+      {/* ── Step pills ──────────────────────────────────── */}
+      <View style={styles.stepsRow}>
+        {['Scan', 'Identity', 'Secure'].map((s, i) => (
+          <View key={s} style={styles.stepPill}>
+            <View style={[styles.stepNumber, i === 0 && captureSample && styles.stepNumberDone, i === 1 && username.length > 2 && styles.stepNumberDone]}>
+              <Text style={styles.stepNumberText}>{i + 1}</Text>
+            </View>
+            <Text style={styles.stepLabel}>{s}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* ── Camera ──────────────────────────────────────── */}
+      <CameraCapture label="Biometric scan" onCaptureSample={setCaptureSample} disabled={busy} />
+
+      {/* ── Sample status ───────────────────────────────── */}
+      <View style={[styles.sampleStatus, captureSample && styles.sampleStatusReady]}>
+        <View style={[styles.sampleDot, captureSample && styles.sampleDotReady]} />
+        <Text style={[styles.sampleStatusText, captureSample && styles.sampleStatusTextReady]}>
+          {captureSample ? `Face sample captured  ✓` : 'No face sample yet — tap camera above'}
+        </Text>
+      </View>
+
+      {/* ── Inputs ──────────────────────────────────────── */}
+      <Text style={styles.sectionLabel}>IDENTITY</Text>
       <CyberInput label="Username" value={username} onChangeText={setUsername} />
       <CyberInput label="Fallback PIN / Password" value={password} onChangeText={setPassword} secureTextEntry />
       <CyberInput label="Device name" value={deviceName} onChangeText={setDeviceName} />
 
-      <Pressable style={[styles.button, busy && styles.buttonDisabled]} onPress={onEnroll} disabled={busy}>
-        <Text style={styles.buttonText}>{busy ? 'Enrolling...' : 'Enroll Face Login'}</Text>
+      {/* ── Enroll button ───────────────────────────────── */}
+      <Pressable style={[styles.enrollButton, busy && styles.buttonDisabled]} onPress={onEnroll} disabled={busy}>
+        <Text style={styles.enrollButtonText}>{busy ? 'Enrolling…' : 'Enroll Face Login'}</Text>
       </Pressable>
 
+      {/* ── Back link ───────────────────────────────────── */}
       {onGoLogin ? (
-        <Pressable style={styles.linkButton} onPress={onGoLogin}>
-          <Text style={styles.linkText}>Back to login</Text>
+        <Pressable style={styles.backButton} onPress={onGoLogin}>
+          <Text style={styles.backButtonText}>← Already have an account?  Login</Text>
         </Pressable>
       ) : null}
 
-      <View style={styles.noteBox}>
-        <Text style={styles.noteTitle}>Security note</Text>
-        <Text style={styles.noteCopy}>
-          Face templates stay local to this device and are matched with server-assisted analysis only for authentication.
+      {/* ── Security notice ─────────────────────────────── */}
+      <View style={styles.securityNotice}>
+        <Text style={styles.securityNoticeTitle}>Privacy first</Text>
+        <Text style={styles.securityNoticeCopy}>
+          Your face template never leaves this device. Server-side analysis uses only cryptographic embeddings — no raw images are stored.
         </Text>
       </View>
     </ScrollView>
@@ -190,88 +218,225 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
 
 const styles = StyleSheet.create({
   container: {
-    padding: cyberTheme.spacing.outer,
+    paddingHorizontal: cyberTheme.spacing.outer,
+    paddingTop: 28,
+    paddingBottom: 40,
     backgroundColor: cyberTheme.colors.background,
     flexGrow: 1,
   },
-  title: {
-    color: cyberTheme.colors.textPrimary,
+  // ── Header ────────────────────────────────────────────────
+  header: {
+    alignItems: 'center',
+    marginBottom: 22,
+  },
+  headerIconWrap: {
+    width: 68,
+    height: 68,
+    borderRadius: cyberTheme.radius.lg,
+    backgroundColor: '#0A0E1A',
+    borderWidth: 1.5,
+    borderColor: '#7B5CF044',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    shadowColor: '#7B5CF0',
+    shadowOpacity: 0.4,
+    shadowRadius: 18,
+    shadowOffset: {width: 0, height: 0},
+    elevation: 14,
+  },
+  headerIcon: {
     fontSize: 30,
-    fontWeight: '800',
+    color: cyberTheme.colors.accentViolet,
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: '900',
+    color: cyberTheme.colors.textPrimary,
+    letterSpacing: -0.5,
     marginBottom: 6,
   },
   subtitle: {
     color: cyberTheme.colors.textSecondary,
-    marginBottom: 16,
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 20,
   },
+  // ── Steps ─────────────────────────────────────────────────
+  stepsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 20,
+  },
+  stepPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: cyberTheme.colors.surfaceHigh,
+    borderWidth: 1,
+    borderColor: cyberTheme.colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  stepNumber: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: cyberTheme.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumberDone: {
+    backgroundColor: cyberTheme.colors.accentGreen,
+  },
+  stepNumberText: {
+    color: cyberTheme.colors.textPrimary,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  stepLabel: {
+    color: cyberTheme.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // ── Sample status ─────────────────────────────────────────
+  sampleStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: cyberTheme.colors.surfaceHigh,
+    borderWidth: 1,
+    borderColor: cyberTheme.colors.border,
+    borderRadius: cyberTheme.radius.md,
+    padding: 12,
+    marginBottom: 20,
+  },
+  sampleStatusReady: {
+    borderColor: cyberTheme.colors.accentGreen,
+    backgroundColor: '#22C55E0E',
+  },
+  sampleDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: cyberTheme.colors.textMuted,
+  },
+  sampleDotReady: {
+    backgroundColor: cyberTheme.colors.accentGreen,
+    shadowColor: cyberTheme.colors.accentGreen,
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+  },
+  sampleStatusText: {
+    color: cyberTheme.colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  sampleStatusTextReady: {
+    color: cyberTheme.colors.accentGreen,
+    fontWeight: '700',
+  },
+  // ── Section label ─────────────────────────────────────────
+  sectionLabel: {
+    color: cyberTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 2,
+    marginBottom: 12,
+    marginTop: 2,
+  },
+  // ── Inputs (CyberInput renders these) ─────────────────────
   inputWrap: {
     borderWidth: 1,
-    borderColor: '#1f2937',
-    borderRadius: 14,
+    borderColor: cyberTheme.colors.border,
+    borderRadius: cyberTheme.radius.md,
     paddingHorizontal: 14,
-    paddingTop: 20,
-    paddingBottom: 6,
-    marginBottom: 14,
-    backgroundColor: cyberTheme.colors.surfaceSoft,
+    paddingTop: 22,
+    paddingBottom: 8,
+    marginBottom: 12,
+    backgroundColor: cyberTheme.colors.surfaceHigh,
   },
   inputWrapFocused: {
-    borderColor: cyberTheme.colors.accent,
-    ...cyberTheme.shadow.glow,
+    borderColor: cyberTheme.colors.accentViolet,
+    shadowColor: cyberTheme.colors.accentViolet,
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    shadowOffset: {width: 0, height: 0},
+    elevation: 10,
   },
   inputLabel: {
     position: 'absolute',
     left: 14,
-    top: 5,
+    top: 6,
     color: cyberTheme.colors.textMuted,
-    fontSize: 11,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   inputLabelActive: {
-    color: cyberTheme.colors.accent,
+    color: cyberTheme.colors.accentViolet,
   },
   input: {
     color: cyberTheme.colors.textPrimary,
-    paddingTop: 12,
-    paddingBottom: 6,
+    paddingTop: 4,
+    paddingBottom: 2,
+    fontSize: 15,
   },
-  button: {
-    backgroundColor: cyberTheme.colors.accent,
-    borderRadius: 14,
-    padding: 15,
+  // ── Enroll button ─────────────────────────────────────────
+  enrollButton: {
+    backgroundColor: cyberTheme.colors.accentViolet,
+    borderRadius: cyberTheme.radius.md,
+    paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 8,
-    ...cyberTheme.shadow.glow,
+    marginTop: 6,
+    marginBottom: 14,
+    shadowColor: '#7B5CF0',
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    shadowOffset: {width: 0, height: 0},
+    elevation: 14,
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.45,
   },
-  buttonText: {
-    color: '#041a08',
-    fontWeight: '700',
+  enrollButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 16,
+    letterSpacing: 0.3,
   },
-  noteBox: {
-    marginTop: 12,
-    padding: 14,
-    backgroundColor: cyberTheme.colors.surface,
-    borderRadius: 16,
+  // ── Back ──────────────────────────────────────────────────
+  backButton: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginBottom: 20,
+  },
+  backButtonText: {
+    color: cyberTheme.colors.textSecondary,
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  // ── Security notice ───────────────────────────────────────
+  securityNotice: {
+    padding: 16,
+    backgroundColor: cyberTheme.colors.surfaceHigh,
+    borderRadius: cyberTheme.radius.md,
     borderWidth: 1,
-    borderColor: '#1d2b1a',
+    borderColor: '#F7B73122',
   },
-  noteTitle: {
-    fontWeight: '700',
-    color: cyberTheme.colors.accent,
+  securityNoticeTitle: {
+    fontWeight: '800',
+    color: cyberTheme.colors.accentGold,
+    fontSize: 12,
+    letterSpacing: 0.5,
     marginBottom: 6,
   },
-  noteCopy: {
+  securityNoticeCopy: {
     color: cyberTheme.colors.textSecondary,
     lineHeight: 20,
-  },
-  linkButton: {
-    alignItems: 'center',
-    marginTop: 14,
-  },
-  linkText: {
-    color: '#98ff8d',
-    fontWeight: '700',
+    fontSize: 13,
   },
 });
 

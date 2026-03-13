@@ -49,6 +49,17 @@ class FaceAnalyzeRequest(BaseModel):
     image_base64: str = Field(min_length=32)
 
 
+class MotionCheckRequest(BaseModel):
+    frame1_base64: str = Field(min_length=32, description="Baseline frame captured before the challenge")
+    frame2_base64: str = Field(min_length=32, description="Frame captured after the liveness challenge")
+
+
+class MotionCheckResponse(BaseModel):
+    motion_detected: bool
+    diff_score: float = Field(ge=0.0, le=1.0, description="0 = identical frames (static photo), 1 = very different frames (live)")
+    message: str
+
+
 class FaceAnalyzeResponse(BaseModel):
     vector: list[float]
     template_hash: str

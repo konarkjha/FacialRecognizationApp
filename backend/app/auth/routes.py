@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status
 
 from .challenge_service import create_session, hash_password, issue_challenge, verify_challenge_response, verify_password
-from .face_service import analyze_face_image
+from .face_service import analyze_face_image, check_frame_motion
 from .schemas import (
     ApiMessage,
     ChallengeRequest,
@@ -15,6 +15,8 @@ from .schemas import (
     EnrollmentStatusResponse,
     FaceAnalyzeRequest,
     FaceAnalyzeResponse,
+    MotionCheckRequest,
+    MotionCheckResponse,
     PasswordLoginRequest,
     RegisterUserRequest,
     SessionResponse,
@@ -39,6 +41,25 @@ def analyze_face(payload: FaceAnalyzeRequest) -> FaceAnalyzeResponse:
         message=analysis.message,
         liveness_score=analysis.liveness_score,
         is_live=analysis.is_live,
+    )
+
+
+@router.post("/check-motion", response_model=MotionCheckResponse)
+def check_motion(payload: MotionCheckRequest) -> MotionCheckResponse:
+    """Pixel-level motion detection between two captured frames.
+    
+    A static photo / screen held steady will produce near-zero diff_score.
+    A live face always has micro-motion between frames (score ≥ 0.12).
+    """
+    motion_detected, diff_score = check_frame_motion(payload.frame1_base64, payload.frame2_base64)
+    if motion_detected:
+        message = f"Motion detected (diff={diff_score:.3f}) — live face confirmed"
+    else:
+        message = f"No motion detected (diff={diff_score:.3f}) — possible photo or screen replay"
+    return MotionCheckResponse(
+        motion_detected=motion_detected,
+        diff_score=diff_score,
+        message=message,
     )
 
 

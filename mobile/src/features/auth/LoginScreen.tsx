@@ -146,20 +146,27 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      {/* ── Brand Header ──────────────────────────────────── */}
       <View style={styles.brandHeader}>
-        <View style={styles.logoOuter}>
-          <View style={styles.logoInner}>
-            <View style={styles.logoFace} />
-            <View style={styles.logoScanLine} />
+        <View style={styles.logoShell}>
+          <View style={styles.logoRing}>
+            <View style={styles.logoDot} />
           </View>
+          <View style={styles.logoScanLine} />
         </View>
-        <Text style={styles.title}>FaceAuth</Text>
-        <Text style={styles.subtitle}>Secure biometric authentication</Text>
+        <Text style={styles.appName}>FaceAuth<Text style={styles.appNameAccent}>.</Text></Text>
+        <Text style={styles.subtitle}>Biometric authentication powered by AI</Text>
+        <View style={styles.securityBadgeRow}>
+          <View style={styles.securityBadge}><Text style={styles.securityBadgeText}>AES-256</Text></View>
+          <View style={[styles.securityBadge, styles.securityBadgeViolet]}><Text style={[styles.securityBadgeText, styles.securityBadgeTextViolet]}>ANTI-SPOOF</Text></View>
+          <View style={[styles.securityBadge, styles.securityBadgeGold]}><Text style={[styles.securityBadgeText, styles.securityBadgeTextGold]}>LIVENESS</Text></View>
+        </View>
       </View>
 
+      {/* ── Camera ────────────────────────────────────────── */}
       <CameraCapture
-        label="Login capture"
+        label="Biometric scan"
         disabled={busy}
         openPreviewToken={openPreviewToken}
         captureRequestToken={captureRequestToken}
@@ -168,29 +175,34 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
         onCaptureError={onCaptureError}
       />
 
+      {/* ── Status Card ───────────────────────────────────── */}
       <View style={styles.statusCard}>
-        <Text style={styles.statusLabel}>Face status</Text>
+        <View style={styles.statusCardHeader}>
+          <View style={[styles.statusDot, busy && styles.statusDotActive]} />
+          <Text style={styles.statusLabel}>Status</Text>
+        </View>
         <Text style={styles.captureMeta}>{captureMeta}</Text>
       </View>
 
-      <Pressable style={[styles.button, busy && styles.buttonDisabled]} onPress={onFaceLogin} disabled={busy}>
-        <Text style={styles.buttonText}>{busy ? 'Authenticating...' : 'Login with Face'}</Text>
+      {/* ── Primary Action ────────────────────────────────── */}
+      <Pressable style={[styles.primaryButton, busy && styles.buttonDisabled]} onPress={onFaceLogin} disabled={busy}>
+        <Text style={styles.primaryButtonText}>{busy ? 'Authenticating…' : 'Login with Face'}</Text>
       </Pressable>
 
-      <Pressable style={styles.buttonSecondary} onPress={onGoEnroll} disabled={!onGoEnroll || busy}>
-        <Text style={styles.buttonSecondaryText}>Enroll Face</Text>
+      {/* ── Secondary Action ──────────────────────────────── */}
+      <Pressable style={styles.secondaryButton} onPress={onGoEnroll} disabled={!onGoEnroll || busy}>
+        <Text style={styles.secondaryButtonText}>Create account  →</Text>
       </Pressable>
 
-      <View style={styles.row}>
-        <Text style={styles.link}>Camera</Text>
-        <Text style={styles.link}>Face Scan</Text>
-        <Text style={styles.link}>Shield</Text>
-        <Text style={styles.link}>User</Text>
-        <Text style={styles.link}>Lock</Text>
+      {/* ── Divider ───────────────────────────────────────── */}
+      <View style={styles.dividerRow}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>TOOLS</Text>
+        <View style={styles.dividerLine} />
       </View>
 
-      <Pressable style={styles.liveButton} onPress={onGoLive} disabled={!onGoLive}>
-        <Text style={styles.liveButtonText}>Open Live Detection</Text>
+      <Pressable style={styles.outlineButton} onPress={onGoLive} disabled={!onGoLive}>
+        <Text style={styles.outlineButtonText}>Open Live Detection</Text>
       </Pressable>
     </ScrollView>
   );
@@ -198,144 +210,211 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
 
 const styles = StyleSheet.create({
   container: {
-    padding: cyberTheme.spacing.outer,
+    paddingHorizontal: cyberTheme.spacing.outer,
+    paddingTop: 28,
+    paddingBottom: 40,
     backgroundColor: cyberTheme.colors.background,
     flexGrow: 1,
   },
+  // ── Brand Header ──────────────────────────────────────────
   brandHeader: {
     alignItems: 'center',
-    marginBottom: 18,
+    marginBottom: 26,
   },
-  logoOuter: {
-    width: 74,
-    height: 74,
-    borderRadius: 20,
-    backgroundColor: '#101318',
-    borderWidth: 1,
-    borderColor: '#1d2b1a',
+  logoShell: {
+    width: 80,
+    height: 80,
+    borderRadius: cyberTheme.radius.xl,
+    backgroundColor: '#0A0E1A',
+    borderWidth: 1.5,
+    borderColor: '#00D4FF44',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
-    ...cyberTheme.shadow.glow,
+    marginBottom: 14,
+    shadowColor: '#00D4FF',
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    shadowOffset: {width: 0, height: 0},
+    elevation: 16,
   },
-  logoInner: {
-    width: 50,
-    height: 50,
-    borderRadius: 14,
-    borderWidth: 1,
+  logoRing: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 2,
     borderColor: cyberTheme.colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
   },
-  logoFace: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 2,
-    borderColor: '#9DFD8C',
+  logoDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: cyberTheme.colors.accent,
+    opacity: 0.9,
   },
   logoScanLine: {
     position: 'absolute',
-    width: '100%',
-    height: 2,
+    width: 46,
+    height: 1.5,
     backgroundColor: cyberTheme.colors.accent,
-    top: 16,
-    opacity: 0.85,
+    opacity: 0.6,
   },
-  title: {
-    fontSize: 34,
-    fontWeight: '800',
+  appName: {
+    fontSize: 38,
+    fontWeight: '900',
     color: cyberTheme.colors.textPrimary,
-    marginBottom: 4,
+    letterSpacing: -0.5,
+    marginBottom: 5,
+  },
+  appNameAccent: {
+    color: cyberTheme.colors.accent,
   },
   subtitle: {
     color: cyberTheme.colors.textSecondary,
-    marginBottom: 12,
-    lineHeight: 20,
+    fontSize: 13,
     textAlign: 'center',
-  },
-  captureMeta: {
-    color: '#9dfd8c',
-    fontWeight: '600',
     lineHeight: 20,
-  },
-  statusCard: {
-    borderWidth: 1,
-    borderColor: '#1f2937',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 16,
-    backgroundColor: cyberTheme.colors.surfaceSoft,
-  },
-  statusLabel: {
-    color: cyberTheme.colors.textSecondary,
-    marginBottom: 6,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  button: {
-    borderWidth: 1,
-    borderColor: '#7DFF69',
-    borderRadius: 14,
-    padding: 15,
     marginBottom: 14,
-    backgroundColor: cyberTheme.colors.accent,
-    alignItems: 'center',
-    ...cyberTheme.shadow.glow,
   },
-  buttonSecondary: {
-    backgroundColor: 'transparent',
-    borderColor: '#2ba30f',
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  buttonDisabled: {
-    opacity: 0.55,
-  },
-  buttonText: {
-    color: '#031207',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  buttonSecondaryText: {
-    color: '#9DFF8A',
-    fontWeight: '700',
-  },
-  row: {
+  securityBadgeRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 8,
-    marginBottom: 12,
+    gap: 6,
   },
-  link: {
-    color: '#93c5fd',
-    fontWeight: '700',
-    fontSize: 12,
-    backgroundColor: '#111827',
+  securityBadge: {
     borderWidth: 1,
-    borderColor: '#1f2937',
+    borderColor: cyberTheme.colors.accent,
+    backgroundColor: '#00D4FF12',
     borderRadius: 999,
     paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingVertical: 3,
   },
-  liveButton: {
-    marginTop: 2,
-    backgroundColor: '#10171f',
-    borderRadius: 14,
+  securityBadgeViolet: {
+    borderColor: cyberTheme.colors.accentViolet,
+    backgroundColor: '#7B5CF012',
+  },
+  securityBadgeGold: {
+    borderColor: cyberTheme.colors.accentGold,
+    backgroundColor: '#F7B73112',
+  },
+  securityBadgeText: {
+    color: cyberTheme.colors.accent,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+  },
+  securityBadgeTextViolet: {
+    color: cyberTheme.colors.accentViolet,
+  },
+  securityBadgeTextGold: {
+    color: cyberTheme.colors.accentGold,
+  },
+  // ── Status Card ───────────────────────────────────────────
+  statusCard: {
     borderWidth: 1,
-    borderColor: '#2ba30f',
+    borderColor: cyberTheme.colors.border,
+    borderRadius: cyberTheme.radius.md,
     padding: 14,
+    marginBottom: 16,
+    backgroundColor: cyberTheme.colors.surfaceHigh,
+  },
+  statusCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginBottom: 6,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: cyberTheme.colors.textMuted,
+  },
+  statusDotActive: {
+    backgroundColor: cyberTheme.colors.accent,
+    shadowColor: cyberTheme.colors.accent,
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+  },
+  statusLabel: {
+    color: cyberTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  captureMeta: {
+    color: cyberTheme.colors.textSecondary,
+    fontWeight: '500',
+    lineHeight: 20,
+    fontSize: 13,
+  },
+  // ── Buttons ───────────────────────────────────────────────
+  primaryButton: {
+    backgroundColor: cyberTheme.colors.accent,
+    borderRadius: cyberTheme.radius.md,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+    shadowColor: '#00D4FF',
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    shadowOffset: {width: 0, height: 0},
+    elevation: 14,
+  },
+  primaryButtonText: {
+    color: '#020E14',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  secondaryButton: {
+    backgroundColor: cyberTheme.colors.surfaceHigh,
+    borderWidth: 1.5,
+    borderColor: cyberTheme.colors.accentViolet,
+    borderRadius: cyberTheme.radius.md,
+    paddingVertical: 15,
+    alignItems: 'center',
+    marginBottom: 22,
+  },
+  secondaryButtonText: {
+    color: cyberTheme.colors.accentViolet,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  buttonDisabled: {
+    opacity: 0.45,
+  },
+  // ── Divider ───────────────────────────────────────────────
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: cyberTheme.colors.border,
+  },
+  dividerText: {
+    color: cyberTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+  outlineButton: {
+    borderWidth: 1,
+    borderColor: cyberTheme.colors.border,
+    borderRadius: cyberTheme.radius.md,
+    paddingVertical: 13,
     alignItems: 'center',
   },
-  liveButtonText: {
-    color: '#90ff81',
-    fontWeight: '800',
+  outlineButtonText: {
+    color: cyberTheme.colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
 

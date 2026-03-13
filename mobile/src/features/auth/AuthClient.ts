@@ -31,6 +31,12 @@ export type FaceAnalyzeResponse = {
   is_live: boolean;
 };
 
+export type MotionCheckResponse = {
+  motion_detected: boolean;
+  diff_score: number;
+  message: string;
+};
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
@@ -73,6 +79,12 @@ export const AuthClient = {
     request<FaceAnalyzeResponse>('/auth/analyze-face', {
       method: 'POST',
       body: JSON.stringify({image_base64: imageBase64}),
+    }),
+
+  checkMotion: (frame1Base64: string, frame2Base64: string) =>
+    request<MotionCheckResponse>('/auth/check-motion', {
+      method: 'POST',
+      body: JSON.stringify({frame1_base64: frame1Base64, frame2_base64: frame2Base64}),
     }),
 
   createChallenge: (username: string, deviceId: string, mode: 'face-primary' | 'face-mfa') =>

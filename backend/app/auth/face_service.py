@@ -216,8 +216,59 @@ def _embed_face(image: np.ndarray, face: np.ndarray) -> list[float]:
     return [round(float(value), 6) for value in embedding.tolist()]
 
 
-def analyze_face_image(image_base64: str) -> FaceAnalysis:
-    image = _decode_base64_image(image_base64)
+def check_frame_motion(frame1_base64: str, frame2_base64: str) -> tuple[bool, float]:
+    """
+    Compare two frames at the pixel level to detect real face movement.
+
+    A static photo or screen replay held steady in front of the camera will
+    produce two nearly identical frames (diff_score ≈ 0).  A live person
+    naturally micro-moves between captures, producing a measurable diff.
+
+    Returns (motion_detected: bool, diff_score: float ∈ [0, 1]).
+    """
+    try:
+        img1 = _decode_base64_image(frame1_base64)
+        img2 = _decode_base64_image(frame2_base64)
+
+        # Normalise both to same size for comparison
+        target = (256, 256)
+        img1 = cv2.resize(img1, target, interpolation=cv2.INTER_AREA)
+        img2 = cv2.resize(img2, target, interpolation=cv2.INTER_AREA)
+
+        # Convert to float grayscale
+        g1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        g2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+        # Mean absolute difference (0–255)
+        mad = float(np.mean(np.abs(g1 - g2)))
+
+        # Structural similarity is better than raw MAD — use both
+        # SSIM in [−1, 1]; 1 = identical
+        # Simple gradient-based approximation (avoids scipy dependency)
+        diff = np.abs(g1 - g2)
+        sigma1 = float(np.std(g1)) or 1e-6
+        sigma2 = float(np.std(g2)) or 1e-6
+        cov = float(np.mean((g1 - g1.mean()) * (g2 - g2.mean())))
+        ssim = (2 * g1.mean() * g2.mean() + 1e-4) * (2 * cov + 1e-4) / (
+            (g1.mean() ** 2 + g2.mean() ** 2 + 1e-4) * (sigma1 ** 2 + sigma2 ** 2 + 1e-4)
+        )
+        ssim = float(np.clip(ssim, -1.0, 1.0))
+
+        # diff_score: 0 → frames identical, 1 → very different
+        mad_norm = float(np.clip(mad / 20.0, 0.0, 1.0))   # MAD of 20 gray units → score 1
+        ssim_diff = float(np.clip((1.0 - ssim) / 0.5, 0.0, 1.0))
+        diff_score = round(float(np.clip(0.6 * mad_norm + 0.4 * ssim_diff, 0.0, 1.0)), 4)
+
+        # Threshold: diff_score >= 0.12 means measurable motion
+        motion_detected = diff_score >= 0.12
+        return motion_detected, diff_score
+
+    except Exception:
+        # Cannot decode → assume no motion (fail-safe)
+        return False, 0.0
+
+
+def analyze_face_image(image_base64: str) -> FaceAnalysis:    image = _decode_base64_image(image_base64)
     image = _resize_for_inference(image)
     face, confidence, face_image = _detect_face_with_fallback(image)
     if face is None:
