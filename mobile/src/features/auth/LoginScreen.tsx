@@ -38,7 +38,9 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
   const [currentPoseIndex, setCurrentPoseIndex] = useState(0);
   const [poseEmbeddings, setPoseEmbeddings] = useState<Partial<Record<PoseKey, FaceEmbedding>>>({});
   const [captureMeta, setCaptureMeta] = useState('Tap Start Guided Login, then capture each pose: front, left, right, up, down.');
-  const [serverScoreSummary, setServerScoreSummary] = useState<string>('');
+  const [serverOverallScore, setServerOverallScore] = useState<number | null>(null);
+  const [serverRequiredScore, setServerRequiredScore] = useState<number | null>(null);
+  const [serverPoseScores, setServerPoseScores] = useState<Partial<Record<PoseKey, number>>>({});
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentPose = POSE_FLOW[currentPoseIndex];
@@ -90,6 +92,13 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
     const serverOverall = typeof session.match_score === 'number' ? session.match_score : match.score;
     const required = typeof session.match_required === 'number' ? session.match_required : 70;
     const poseScores = session.pose_scores ?? {};
+    const normalizedPoseScores: Partial<Record<PoseKey, number>> = {
+      front: typeof poseScores.front === 'number' ? poseScores.front : undefined,
+      left: typeof poseScores.left === 'number' ? poseScores.left : undefined,
+      right: typeof poseScores.right === 'number' ? poseScores.right : undefined,
+      up: typeof poseScores.up === 'number' ? poseScores.up : undefined,
+      down: typeof poseScores.down === 'number' ? poseScores.down : undefined,
+    };
     const poseOrder: Array<{key: string; label: string}> = [
       {key: 'front', label: 'Front'},
       {key: 'left', label: 'Left'},
@@ -102,7 +111,9 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
       .map(item => `${item.label}: ${poseScores[item.key].toFixed(1)}%`)
       .join(' • ');
 
-    setServerScoreSummary(`Server score ${serverOverall.toFixed(1)}% (required ${required.toFixed(1)}%)${breakdown ? `\n${breakdown}` : ''}`);
+    setServerOverallScore(serverOverall);
+    setServerRequiredScore(required);
+    setServerPoseScores(normalizedPoseScores);
     setCaptureMeta(`Face recognized. Server score ${serverOverall.toFixed(1)}% as ${session.username}.`);
     Alert.alert(
       'Face login success',
@@ -122,6 +133,9 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
     setPoseEmbeddings({});
     setCurrentPoseIndex(0);
     setBusy(false);
+    setServerOverallScore(null);
+    setServerRequiredScore(null);
+    setServerPoseScores({});
     clearAuthTimeout();
     setCaptureMeta('Guided login reset. Capture front, left, right, up, and down poses.');
   };
@@ -226,7 +240,33 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
           <Text style={styles.statusLabel}>Status</Text>
         </View>
         <Text style={styles.captureMeta}>{captureMeta}</Text>
-        {serverScoreSummary ? <Text style={styles.serverScoreText}>{serverScoreSummary}</Text> : null}
+        {serverOverallScore !== null ? (
+          <>
+            <Text style={styles.serverScoreHeadline}>
+              Server score {serverOverallScore.toFixed(1)}% (required {(serverRequiredScore ?? 70).toFixed(1)}%)
+            </Text>
+            <View style={styles.poseScoreRow}>
+              {POSE_FLOW.map(item => {
+                const value = serverPoseScores[item.key];
+                const toneStyle =
+                  typeof value !== 'number'
+                    ? styles.poseScoreNeutral
+                    : value >= 80
+                    ? styles.poseScoreGood
+                    : value >= 70
+                    ? styles.poseScoreWarn
+                    : styles.poseScoreBad;
+
+                return (
+                  <View key={item.key} style={[styles.poseScoreChip, toneStyle]}>
+                    <Text style={styles.poseScoreLabel}>{item.label}</Text>
+                    <Text style={styles.poseScoreValue}>{typeof value === 'number' ? `${value.toFixed(1)}%` : '--'}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
       </View>
 
       {/* ── Primary Action ────────────────────────────────── */}
@@ -398,12 +438,52 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontSize: 13,
   },
-  serverScoreText: {
+  serverScoreHeadline: {
     color: cyberTheme.colors.accentGold,
     marginTop: 8,
     fontSize: 12,
     lineHeight: 18,
+    fontWeight: '800',
+  },
+  poseScoreRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  poseScoreChip: {
+    minWidth: 74,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  poseScoreNeutral: {
+    borderColor: cyberTheme.colors.border,
+    backgroundColor: cyberTheme.colors.surface,
+  },
+  poseScoreGood: {
+    borderColor: '#22C55E',
+    backgroundColor: '#22C55E22',
+  },
+  poseScoreWarn: {
+    borderColor: '#F7B731',
+    backgroundColor: '#F7B73122',
+  },
+  poseScoreBad: {
+    borderColor: '#FF4D6D',
+    backgroundColor: '#FF4D6D22',
+  },
+  poseScoreLabel: {
+    color: cyberTheme.colors.textSecondary,
+    fontSize: 10,
     fontWeight: '700',
+  },
+  poseScoreValue: {
+    color: cyberTheme.colors.textPrimary,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 2,
   },
   poseGuideCard: {
     backgroundColor: cyberTheme.colors.surfaceHigh,
