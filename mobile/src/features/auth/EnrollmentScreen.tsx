@@ -61,23 +61,47 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
   const [busy, setBusy] = useState(false);
   const [currentPoseIndex, setCurrentPoseIndex] = useState(0);
   const [poseEmbeddings, setPoseEmbeddings] = useState<Partial<Record<PoseKey, FaceEmbedding>>>({});
+  const [openPreviewToken, setOpenPreviewToken] = useState<number | undefined>(undefined);
+  const [captureRequestToken, setCaptureRequestToken] = useState<number | undefined>(undefined);
+  const [flipRequestToken, setFlipRequestToken] = useState<number | undefined>(undefined);
   const [captureStatus, setCaptureStatus] = useState('Capture all 5 guided poses to create your face profile.');
   const enrollInFlightRef = useRef(false);
+  const captureInFlightRef = useRef(false);
 
   const currentPose = POSE_FLOW[currentPoseIndex];
   const allPosesCaptured = POSE_FLOW.every(item => Boolean(poseEmbeddings[item.key]));
 
-  const onPoseCaptured = async (sample: FaceCaptureSample) => {
-    if (!currentPose || busy) {
+  const onStartAutoCapture = () => {
+    if (busy) {
       return;
     }
+    setPoseEmbeddings({});
+    setCurrentPoseIndex(0);
+    setBusy(true);
+    captureInFlightRef.current = false;
+    setCaptureStatus('Opening camera...');
+    setOpenPreviewToken(token => (token ?? 0) + 1);
+    setTimeout(() => {
+      setCaptureStatus(`Auto capture: ${POSE_FLOW[0].instruction}`);
+      setCaptureRequestToken(token => (token ?? 0) + 1);
+    }, 1200);
+  };
+
+  const onFlipCamera = () => {
+    setFlipRequestToken(token => (token ?? 0) + 1);
+  };
+
+  const onPoseCaptured = async (sample: FaceCaptureSample) => {
+    if (!currentPose || !busy || captureInFlightRef.current) {
+      return;
+    }
+    captureInFlightRef.current = true;
 
     if (!sample.imageBase64) {
       Alert.alert('Capture failed', 'Image capture failed. Please retake this pose.');
       return;
     }
 
-    setBusy(true);
     try {
       const analysis = await AuthClient.analyzeFace(sample.imageBase64);
       if (!analysis.face_detected) {
@@ -91,15 +115,21 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
       setPoseEmbeddings(prev => ({...prev, [currentPose.key]: embedding}));
 
       if (currentPoseIndex < POSE_FLOW.length - 1) {
-        setCurrentPoseIndex(index => index + 1);
-        setCaptureStatus(`Captured ${currentPose.label} pose. Next: ${POSE_FLOW[currentPoseIndex + 1].instruction}`);
+        const nextIndex = currentPoseIndex + 1;
+        setCurrentPoseIndex(nextIndex);
+        setCaptureStatus(`Captured ${currentPose.label}. Auto capture: ${POSE_FLOW[nextIndex].instruction}`);
+        setTimeout(() => {
+          setCaptureRequestToken(token => (token ?? 0) + 1);
+        }, 650);
       } else {
         setCaptureStatus('All 5 poses captured. You can now enroll face login.');
+        setBusy(false);
       }
     } catch (error) {
       Alert.alert('Capture invalid', error instanceof Error ? error.message : 'Unknown error');
-    } finally {
       setBusy(false);
+    } finally {
+      captureInFlightRef.current = false;
     }
   };
 
@@ -235,7 +265,25 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
       </View>
 
       {/* ── Camera ──────────────────────────────────────── */}
-      <CameraCapture label="Biometric scan" onCaptureSample={onPoseCaptured} disabled={busy || allPosesCaptured} actionsMode="full" />
+      <CameraCapture
+        label="Biometric scan"
+        onCaptureSample={onPoseCaptured}
+        disabled={busy}
+        actionsMode="none"
+        captureMode="single"
+        openPreviewToken={openPreviewToken}
+        captureRequestToken={captureRequestToken}
+        flipRequestToken={flipRequestToken}
+      />
+
+      <View style={styles.captureActionsRow}>
+        <Pressable style={[styles.autoCaptureButton, busy && styles.buttonDisabled]} onPress={onStartAutoCapture} disabled={busy}>
+          <Text style={styles.autoCaptureButtonText}>{busy ? 'Auto Capturing...' : 'Start Auto Capture'}</Text>
+        </Pressable>
+        <Pressable style={styles.flipScreenButton} onPress={onFlipCamera}>
+          <Text style={styles.flipScreenButtonText}>Flip Camera</Text>
+        </Pressable>
+      </View>
 
       {/* ── Sample status ───────────────────────────────── */}
       <View style={[styles.sampleStatus, allPosesCaptured && styles.sampleStatusReady]}>
@@ -388,6 +436,37 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginTop: 6,
+  },
+  captureActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  autoCaptureButton: {
+    flex: 1,
+    backgroundColor: cyberTheme.colors.accent,
+    borderRadius: cyberTheme.radius.md,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  autoCaptureButtonText: {
+    color: '#020E14',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  flipScreenButton: {
+    backgroundColor: cyberTheme.colors.surfaceHigh,
+    borderWidth: 1,
+    borderColor: cyberTheme.colors.accentViolet,
+    borderRadius: cyberTheme.radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  flipScreenButtonText: {
+    color: cyberTheme.colors.accentViolet,
+    fontWeight: '700',
+    fontSize: 12,
   },
   // ── Sample status ─────────────────────────────────────────
   sampleStatus: {

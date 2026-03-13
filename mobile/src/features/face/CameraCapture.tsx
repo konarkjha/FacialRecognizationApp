@@ -27,6 +27,8 @@ type CameraCaptureProps = {
   openPreviewToken?: number;
   captureRequestToken?: number;
   actionsMode?: 'full' | 'none';
+  captureMode?: 'single' | 'liveness';
+  flipRequestToken?: number;
 };
 
 function CameraCapture({
@@ -37,11 +39,14 @@ function CameraCapture({
   openPreviewToken,
   captureRequestToken,
   actionsMode = 'full',
+  captureMode = 'single',
+  flipRequestToken,
 }: CameraCaptureProps) {
   const cameraRef = React.useRef<any>(null);
   const scanLine = React.useRef(new Animated.Value(0)).current;
   const lastOpenTokenRef = React.useRef<number | undefined>(undefined);
   const lastCaptureTokenRef = React.useRef<number | undefined>(undefined);
+  const lastFlipTokenRef = React.useRef<number | undefined>(undefined);
   const frame1Ref = React.useRef<string>('');
   const challengeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -212,7 +217,7 @@ function CameraCapture({
         captureId: `${label.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
         capturedAt: new Date().toISOString(),
         imageBase64: frame2.base64,
-        featureSource: frame2.base64.slice(0, 12000),
+        featureSource: frame2.base64.slice(0, 2048),
         width: frame2.width,
         height: frame2.height,
         fileSize: frame2.fileSize,
@@ -263,8 +268,8 @@ function CameraCapture({
       return;
     }
 
-    // actionsMode='none' → full liveness challenge pipeline
-    if (actionsMode === 'none') {
+    // External auto-capture can choose liveness or single-frame pipeline.
+    if (captureMode === 'liveness') {
       await runLivenessCapture();
       return;
     }
@@ -284,7 +289,7 @@ function CameraCapture({
         captureId: `${label.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
         capturedAt: new Date().toISOString(),
         imageBase64: result.base64,
-        featureSource: result.base64.slice(0, 12000),
+        featureSource: result.base64.slice(0, 2048),
         width: result.width,
         height: result.height,
         fileSize: result.fileSize,
@@ -322,7 +327,7 @@ function CameraCapture({
   }, [openPreviewToken, permissionState]);
 
   React.useEffect(() => {
-    if (captureRequestToken === undefined || actionsMode !== 'none') {
+    if (captureRequestToken === undefined) {
       return;
     }
     if (lastCaptureTokenRef.current === captureRequestToken) {
@@ -331,7 +336,18 @@ function CameraCapture({
     lastCaptureTokenRef.current = captureRequestToken;
     captureLiveSample();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [captureRequestToken, actionsMode]);
+  }, [captureRequestToken]);
+
+  React.useEffect(() => {
+    if (flipRequestToken === undefined) {
+      return;
+    }
+    if (lastFlipTokenRef.current === flipRequestToken) {
+      return;
+    }
+    lastFlipTokenRef.current = flipRequestToken;
+    flipCamera();
+  }, [flipRequestToken]);
 
   const scanTranslateY = scanLine.interpolate({
     inputRange: [0, 1],
@@ -351,12 +367,7 @@ function CameraCapture({
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>{label}</Text>
-        <View style={styles.headerActions}>
-          <Pressable style={styles.flipHeaderButton} onPress={flipCamera}>
-            <Text style={styles.flipHeaderText}>Flip</Text>
-          </Pressable>
-          <Text style={styles.badge}>CAMERA</Text>
-        </View>
+        <Text style={styles.badge}>CAMERA</Text>
       </View>
 
       <View style={[styles.preview, cameraState === 'failure' && styles.previewFailure]}>
@@ -387,11 +398,6 @@ function CameraCapture({
               <View style={[styles.corner, styles.cornerBottomRight]} />
               <Animated.View style={[styles.scanLine, {transform: [{translateY: scanTranslateY}]}]} />
               {faceCount > 0 ? <View style={styles.faceBox} /> : null}
-
-              {/* ── Flip camera button ───────────────────────── */}
-              <Pressable style={styles.flipButton} onPress={flipCamera} disabled={disabled}>
-                <Text style={styles.flipButtonText}>Rotate camera</Text>
-              </Pressable>
 
               {/* ── Liveness challenge overlay ───────────────── */}
               {challengeStep === 'challenge' && (
@@ -457,24 +463,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 10,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  flipHeaderButton: {
-    borderWidth: 1,
-    borderColor: cyberTheme.colors.accentViolet,
-    backgroundColor: '#7B5CF018',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  flipHeaderText: {
-    color: cyberTheme.colors.accentViolet,
-    fontSize: 11,
-    fontWeight: '700',
   },
   title: {
     color: cyberTheme.colors.textPrimary,
@@ -632,24 +620,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 14,
     letterSpacing: 0.3,
-  },
-  flipButton: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,212,255,0.15)',
-    borderWidth: 1.5,
-    borderColor: cyberTheme.colors.accent,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  flipButtonText: {
-    color: cyberTheme.colors.accent,
-    fontSize: 11,
-    fontWeight: '700',
   },
   challengeOverlay: {
     position: 'absolute',

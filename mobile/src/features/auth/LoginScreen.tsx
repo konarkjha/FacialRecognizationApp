@@ -37,11 +37,15 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
   const [busy, setBusy] = useState(false);
   const [currentPoseIndex, setCurrentPoseIndex] = useState(0);
   const [poseEmbeddings, setPoseEmbeddings] = useState<Partial<Record<PoseKey, FaceEmbedding>>>({});
+  const [openPreviewToken, setOpenPreviewToken] = useState<number | undefined>(undefined);
+  const [captureRequestToken, setCaptureRequestToken] = useState<number | undefined>(undefined);
+  const [flipRequestToken, setFlipRequestToken] = useState<number | undefined>(undefined);
   const [captureMeta, setCaptureMeta] = useState('Tap Start Guided Login, then capture each pose: front, left, right, up, down.');
   const [serverOverallScore, setServerOverallScore] = useState<number | null>(null);
   const [serverRequiredScore, setServerRequiredScore] = useState<number | null>(null);
   const [serverPoseScores, setServerPoseScores] = useState<Partial<Record<PoseKey, number>>>({});
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captureInFlightRef = useRef(false);
 
   const currentPose = POSE_FLOW[currentPoseIndex];
   const allPosesCaptured = POSE_FLOW.every(item => Boolean(poseEmbeddings[item.key]));
@@ -123,10 +127,24 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
   };
 
   const onStartGuidedLogin = async () => {
-    if (busy || allPosesCaptured) {
+    if (busy) {
       return;
     }
-    setCaptureMeta(`Capture ${currentPose.label} pose: ${currentPose.instruction}`);
+
+    setPoseEmbeddings({});
+    setCurrentPoseIndex(0);
+    setServerOverallScore(null);
+    setServerRequiredScore(null);
+    setServerPoseScores({});
+    setBusy(true);
+    captureInFlightRef.current = false;
+
+    setCaptureMeta('Opening camera...');
+    setOpenPreviewToken(token => (token ?? 0) + 1);
+    setTimeout(() => {
+      setCaptureMeta(`Auto capture: ${POSE_FLOW[0].label} pose`);
+      setCaptureRequestToken(token => (token ?? 0) + 1);
+    }, 1200);
   };
 
   const onResetGuidedLogin = () => {
@@ -136,8 +154,14 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
     setServerOverallScore(null);
     setServerRequiredScore(null);
     setServerPoseScores({});
+    setCaptureRequestToken(undefined);
+    captureInFlightRef.current = false;
     clearAuthTimeout();
     setCaptureMeta('Guided login reset. Capture front, left, right, up, and down poses.');
+  };
+
+  const onFlipCamera = () => {
+    setFlipRequestToken(token => (token ?? 0) + 1);
   };
 
   const onCaptureError = (message: string) => {
@@ -150,9 +174,10 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
 
   const onCaptureSampleReady = async (sample: FaceCaptureSample) => {
     clearAuthTimeout();
-    if (!currentPose || busy) {
+    if (!currentPose || !busy || captureInFlightRef.current) {
       return;
     }
+    captureInFlightRef.current = true;
 
     if (!sample.imageBase64) {
       Alert.alert('Capture failed', 'Image capture failed. Please retake this pose.');
@@ -175,8 +200,12 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
       setPoseEmbeddings(nextEmbeddings);
 
       if (currentPoseIndex < POSE_FLOW.length - 1) {
-        setCurrentPoseIndex(index => index + 1);
-        setCaptureMeta(`Captured ${currentPose.label}. Next: ${POSE_FLOW[currentPoseIndex + 1].instruction}`);
+        const nextIndex = currentPoseIndex + 1;
+        setCurrentPoseIndex(nextIndex);
+        setCaptureMeta(`Captured ${currentPose.label}. Auto capturing: ${POSE_FLOW[nextIndex].label}`);
+        setTimeout(() => {
+          setCaptureRequestToken(token => (token ?? 0) + 1);
+        }, 650);
       } else {
         const profile: MultiPoseFaceProfile = {
           poses: {
@@ -190,11 +219,13 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
         };
         setCaptureMeta('All poses captured. Verifying profile...');
         await authenticateWithProfile(profile);
+        setBusy(false);
       }
     } catch (error) {
       Alert.alert('Face login failed', error instanceof Error ? error.message : 'Unknown error');
-    } finally {
       setBusy(false);
+    } finally {
+      captureInFlightRef.current = false;
     }
   };
 
@@ -221,10 +252,18 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
       <CameraCapture
         label="Biometric scan"
         disabled={busy}
-        actionsMode="full"
+        actionsMode="none"
+        captureMode="single"
+        openPreviewToken={openPreviewToken}
+        captureRequestToken={captureRequestToken}
+        flipRequestToken={flipRequestToken}
         onCaptureSample={onCaptureSampleReady}
         onCaptureError={onCaptureError}
       />
+
+      <Pressable style={styles.flipScreenButton} onPress={onFlipCamera}>
+        <Text style={styles.flipScreenButtonText}>Flip Camera</Text>
+      </Pressable>
 
       <View style={styles.poseGuideCard}>
         <Text style={styles.poseGuideLabel}>Current login pose</Text>
@@ -270,8 +309,8 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
       </View>
 
       {/* ── Primary Action ────────────────────────────────── */}
-      <Pressable style={[styles.primaryButton, busy && styles.buttonDisabled]} onPress={onStartGuidedLogin} disabled={busy || allPosesCaptured}>
-        <Text style={styles.primaryButtonText}>{busy ? 'Processing...' : allPosesCaptured ? 'Poses complete' : 'Start Guided Login'}</Text>
+      <Pressable style={[styles.primaryButton, busy && styles.buttonDisabled]} onPress={onStartGuidedLogin} disabled={busy}>
+        <Text style={styles.primaryButtonText}>{busy ? 'Auto Capturing...' : 'Start Guided Login'}</Text>
       </Pressable>
 
       <Pressable style={[styles.resetButton, busy && styles.buttonDisabled]} onPress={onResetGuidedLogin} disabled={busy}>
@@ -514,6 +553,21 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 12,
     fontWeight: '700',
+  },
+  flipScreenButton: {
+    alignSelf: 'flex-end',
+    backgroundColor: cyberTheme.colors.surfaceHigh,
+    borderWidth: 1,
+    borderColor: cyberTheme.colors.accentViolet,
+    borderRadius: cyberTheme.radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  flipScreenButtonText: {
+    color: cyberTheme.colors.accentViolet,
+    fontWeight: '700',
+    fontSize: 12,
   },
   // ── Buttons ───────────────────────────────────────────────
   primaryButton: {
