@@ -27,6 +27,8 @@ export type FaceAnalyzeResponse = {
   face_detected: boolean;
   confidence: number;
   message: string;
+  liveness_score: number;
+  is_live: boolean;
 };
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

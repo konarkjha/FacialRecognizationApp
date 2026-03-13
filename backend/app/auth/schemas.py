@@ -55,6 +55,8 @@ class FaceAnalyzeResponse(BaseModel):
     face_detected: bool
     confidence: float = Field(ge=0.0, le=1.0)
     message: str
+    liveness_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    is_live: bool = True
 
 
 class ChallengeResponse(BaseModel):

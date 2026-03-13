@@ -60,6 +60,12 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
       throw new Error(analysis.message);
     }
 
+    // Anti-spoofing: reject if backend texture analysis flags image as non-live
+    if (!analysis.is_live) {
+      setCaptureMeta(`Anti-spoofing check failed (score ${analysis.liveness_score.toFixed(2)}). Use a real live face.`);
+      throw new Error('Liveness check failed — photo or screen replay detected. Please look directly at the camera.');
+    }
+
     const challenge = await AuthClient.createChallenge(binding.username, binding.deviceId, 'face-primary');
     const candidateTemplate = EmbeddingEngine.fromAnalysis(analysis.vector, analysis.template_hash);
     const match = MatchService.compare(candidateTemplate, enrolledTemplate);

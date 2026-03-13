@@ -17,6 +17,8 @@ class FaceAnalysis:
     face_detected: bool
     confidence: float
     message: str
+    liveness_score: float = 0.5
+    is_live: bool = True
 
 
 MODEL_DIR = Path(__file__).resolve().parents[2] / "models"
@@ -117,6 +119,93 @@ def _detect_face_with_fallback(image: np.ndarray) -> tuple[np.ndarray | None, fl
     return mapped_face, float(resized_confidence), image
 
 
+def _compute_liveness_score(image: np.ndarray, face: np.ndarray) -> tuple[float, bool]:
+    """
+    Passive anti-spoofing: distinguish a live face from a printed photo or
+    screen replay using three complementary signals.
+
+    1. Sub-region sharpness variance  – real 3-D faces have uneven focus;
+       flat printed / screen photos tend toward uniform sharpness.
+    2. Gradient texture entropy       – real skin has rich micro-texture;
+       low-resolution reprints are smoother.
+    3. Frequency-domain peak ratio    – screens and colour-laser prints leave
+       periodic artefacts that show as strong off-centre FFT peaks.
+
+    Returns (score ∈ [0, 1], is_live).
+    """
+    x, y, w, h = int(face[0]), int(face[1]), int(face[2]), int(face[3])
+    ih, iw = image.shape[:2]
+
+    pad_x = max(0, int(w * 0.20))
+    pad_y = max(0, int(h * 0.10))
+    x1, y1 = max(0, x - pad_x), max(0, y - pad_y)
+    x2, y2 = min(iw, x + w + pad_x), min(ih, y + h + pad_y)
+
+    face_crop = image[y1:y2, x1:x2]
+    if face_crop.size == 0:
+        return 0.5, True  # cannot determine – pass through
+
+    face_crop = cv2.resize(face_crop, (128, 128), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+
+    # ── Signal 1: sharpness variance across 3×3 grid ──────────────────────
+    sh = gray.shape[0] // 3
+    sw = gray.shape[1] // 3
+    lap_vars: list[float] = []
+    for r in range(3):
+        for c in range(3):
+            patch = gray[r * sh:(r + 1) * sh, c * sw:(c + 1) * sw]
+            if patch.size > 0:
+                lap_vars.append(float(cv2.Laplacian(patch, cv2.CV_64F).var()))
+    blur_std = float(np.std(lap_vars)) if lap_vars else 0.0
+    blur_mean = float(np.mean(lap_vars)) if lap_vars else 0.0
+
+    # ── Signal 2: gradient magnitude entropy ──────────────────────────────
+    sx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    sy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    grad = np.sqrt(sx ** 2 + sy ** 2)
+    texture_std = float(np.std(grad))
+
+    # ── Signal 3: FFT periodic-artefact ratio ─────────────────────────────
+    dft = np.fft.fftshift(np.fft.fft2(gray.astype(np.float32)))
+    mag = np.abs(dft)
+    cy, cx = mag.shape[0] // 2, mag.shape[1] // 2
+    mag[cy, cx] = 0.0  # suppress DC component
+    mag_max = mag.max()
+    peak_ratio = float((mag > 0.30 * mag_max).sum()) / float(mag.size) if mag_max > 0 else 0.0
+
+    # ── Aggregate score ───────────────────────────────────────────────────
+    score = 0.40
+
+    # Sharpness variation: 3-D faces have uneven depth-of-field
+    if blur_std > 20.0:
+        score += 0.15
+    elif blur_std > 8.0:
+        score += 0.07
+
+    # Sufficient overall sharpness (not a blurry photo hack)
+    if blur_mean > 30.0:
+        score += 0.05
+
+    # Texture richness
+    if texture_std > 25.0:
+        score += 0.15
+    elif texture_std > 12.0:
+        score += 0.07
+
+    # Frequency artefacts: many strong peaks → screen / print
+    if peak_ratio < 0.010:
+        score += 0.10
+    elif peak_ratio < 0.025:
+        score += 0.04
+    else:
+        score -= 0.18  # strong periodic pattern: likely screen replay
+
+    score = float(np.clip(score, 0.0, 1.0))
+    is_live = score >= 0.52
+    return score, is_live
+
+
 def _embed_face(image: np.ndarray, face: np.ndarray) -> list[float]:
     recognizer = _get_face_recognizer()
     aligned_face = recognizer.alignCrop(image, face)
@@ -144,10 +233,14 @@ def analyze_face_image(image_base64: str) -> FaceAnalysis:
     vector_bytes = ",".join(f"{value:.6f}" for value in vector).encode("utf-8")
     template_hash = hashlib.sha256(vector_bytes).hexdigest()[:32]
 
+    liveness_score, is_live = _compute_liveness_score(face_image, face)
+
     return FaceAnalysis(
         vector=vector,
         template_hash=template_hash,
         face_detected=True,
         confidence=round(confidence, 4),
         message="Neural face embedding generated",
+        liveness_score=round(liveness_score, 4),
+        is_live=is_live,
     )

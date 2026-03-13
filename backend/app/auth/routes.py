@@ -37,6 +37,8 @@ def analyze_face(payload: FaceAnalyzeRequest) -> FaceAnalyzeResponse:
         face_detected=analysis.face_detected,
         confidence=analysis.confidence,
         message=analysis.message,
+        liveness_score=analysis.liveness_score,
+        is_live=analysis.is_live,
     )
 
 

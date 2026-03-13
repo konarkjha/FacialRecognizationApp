@@ -123,6 +123,12 @@ function EnrollmentScreen({onGoLogin, onLoginSuccess}: EnrollmentScreenProps) {
       if (!analysis.face_detected) {
         throw new Error(analysis.message);
       }
+
+      // Anti-spoofing: block enrollment from photos or screen replays
+      if (!analysis.is_live) {
+        throw new Error(`Anti-spoofing check failed (score ${analysis.liveness_score.toFixed(2)}). Enroll using a real live face — do not use a photo or screen image.`);
+      }
+
       const template = EmbeddingEngine.fromAnalysis(analysis.vector, analysis.template_hash);
 
       if (!serverHasUser) {
