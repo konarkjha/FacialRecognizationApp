@@ -119,6 +119,31 @@ def _detect_face_with_fallback(image: np.ndarray) -> tuple[np.ndarray | None, fl
     return mapped_face, float(resized_confidence), image
 
 
+def _normalized_landmarks(face: np.ndarray) -> np.ndarray:
+    x, y, w, h = float(face[0]), float(face[1]), float(face[2]), float(face[3])
+    if w <= 0 or h <= 0:
+        return np.zeros((5, 2), dtype=np.float32)
+    points = np.asarray(
+        [
+            [face[4], face[5]],
+            [face[6], face[7]],
+            [face[8], face[9]],
+            [face[10], face[11]],
+            [face[12], face[13]],
+        ],
+        dtype=np.float32,
+    )
+    points[:, 0] = (points[:, 0] - x) / w
+    points[:, 1] = (points[:, 1] - y) / h
+    return points
+
+
+def _landmark_geometry_delta(face1: np.ndarray, face2: np.ndarray) -> float:
+    lm1 = _normalized_landmarks(face1)
+    lm2 = _normalized_landmarks(face2)
+    return float(np.mean(np.abs(lm1 - lm2)))
+
+
 def _compute_liveness_score(image: np.ndarray, face: np.ndarray) -> tuple[float, bool]:
     """
     Passive anti-spoofing: distinguish a live face from a printed photo or
@@ -227,25 +252,22 @@ def check_frame_motion(frame1_base64: str, frame2_base64: str) -> tuple[bool, fl
     Returns (motion_detected: bool, diff_score: float ∈ [0, 1]).
     """
     try:
-        img1 = _decode_base64_image(frame1_base64)
-        img2 = _decode_base64_image(frame2_base64)
+        raw1 = _decode_base64_image(frame1_base64)
+        raw2 = _decode_base64_image(frame2_base64)
 
-        # Normalise both to same size for comparison
+        img1 = _resize_for_inference(raw1)
+        img2 = _resize_for_inference(raw2)
+
+        face1, _conf1, face_image1 = _detect_face_with_fallback(img1)
+        face2, _conf2, face_image2 = _detect_face_with_fallback(img2)
+        if face1 is None or face2 is None:
+            return False, 0.0
+
+        # Global frame motion
         target = (256, 256)
-        img1 = cv2.resize(img1, target, interpolation=cv2.INTER_AREA)
-        img2 = cv2.resize(img2, target, interpolation=cv2.INTER_AREA)
-
-        # Convert to float grayscale
-        g1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        g2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY).astype(np.float32)
-
-        # Mean absolute difference (0–255)
+        g1 = cv2.cvtColor(cv2.resize(raw1, target, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY).astype(np.float32)
+        g2 = cv2.cvtColor(cv2.resize(raw2, target, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY).astype(np.float32)
         mad = float(np.mean(np.abs(g1 - g2)))
-
-        # Structural similarity is better than raw MAD — use both
-        # SSIM in [−1, 1]; 1 = identical
-        # Simple gradient-based approximation (avoids scipy dependency)
-        diff = np.abs(g1 - g2)
         sigma1 = float(np.std(g1)) or 1e-6
         sigma2 = float(np.std(g2)) or 1e-6
         cov = float(np.mean((g1 - g1.mean()) * (g2 - g2.mean())))
@@ -253,14 +275,23 @@ def check_frame_motion(frame1_base64: str, frame2_base64: str) -> tuple[bool, fl
             (g1.mean() ** 2 + g2.mean() ** 2 + 1e-4) * (sigma1 ** 2 + sigma2 ** 2 + 1e-4)
         )
         ssim = float(np.clip(ssim, -1.0, 1.0))
-
-        # diff_score: 0 → frames identical, 1 → very different
-        mad_norm = float(np.clip(mad / 20.0, 0.0, 1.0))   # MAD of 20 gray units → score 1
+        mad_norm = float(np.clip(mad / 20.0, 0.0, 1.0))
         ssim_diff = float(np.clip((1.0 - ssim) / 0.5, 0.0, 1.0))
-        diff_score = round(float(np.clip(0.6 * mad_norm + 0.4 * ssim_diff, 0.0, 1.0)), 4)
+        global_motion = float(np.clip(0.6 * mad_norm + 0.4 * ssim_diff, 0.0, 1.0))
 
-        # Threshold: diff_score >= 0.12 means measurable motion
-        motion_detected = diff_score >= 0.12
+        # Depth proxy: landmark geometry must change between frames.
+        # Moving a flat photo in front of camera changes global pixels,
+        # but landmark geometry usually stays very similar.
+        geometry_delta = _landmark_geometry_delta(face1, face2)
+        geometry_motion = float(np.clip(geometry_delta / 0.05, 0.0, 1.0))
+
+        # Passive texture score from the second frame must also be live-like.
+        texture_score, texture_live = _compute_liveness_score(face_image2, face2)
+
+        diff_score = round(float(np.clip(0.50 * global_motion + 0.30 * geometry_motion + 0.20 * texture_score, 0.0, 1.0)), 4)
+
+        # Strict gate: require geometry + global motion + texture-liveness
+        motion_detected = global_motion >= 0.14 and geometry_delta >= 0.008 and texture_live and diff_score >= 0.38
         return motion_detected, diff_score
 
     except Exception:
@@ -268,7 +299,8 @@ def check_frame_motion(frame1_base64: str, frame2_base64: str) -> tuple[bool, fl
         return False, 0.0
 
 
-def analyze_face_image(image_base64: str) -> FaceAnalysis:    image = _decode_base64_image(image_base64)
+def analyze_face_image(image_base64: str) -> FaceAnalysis:
+    image = _decode_base64_image(image_base64)
     image = _resize_for_inference(image)
     face, confidence, face_image = _detect_face_with_fallback(image)
     if face is None:
@@ -285,6 +317,7 @@ def analyze_face_image(image_base64: str) -> FaceAnalysis:    image = _decode_ba
     template_hash = hashlib.sha256(vector_bytes).hexdigest()[:32]
 
     liveness_score, is_live = _compute_liveness_score(face_image, face)
+    is_live = bool(is_live and liveness_score >= 0.62)
 
     return FaceAnalysis(
         vector=vector,

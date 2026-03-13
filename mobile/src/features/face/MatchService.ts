@@ -29,7 +29,7 @@ export const MatchService = {
     const similarity = cosineSimilarity(candidate.vector, enrolled.vector);
     const distance = meanAbsoluteDistance(candidate.vector, enrolled.vector);
     return {
-      matched: similarity >= 0.45 && distance <= 0.09,
+      matched: similarity >= 0.74 && distance <= 0.065,
       similarity,
     };
   },

@@ -16,7 +16,7 @@ import {FaceCaptureSample} from './LivenessChecks';
 import {AuthClient} from '../auth/AuthClient';
 import {cyberTheme} from '../../theme/cyberTheme';
 
-const LIVENESS_CHALLENGES = ['BLINK', 'SMILE', 'NOD YOUR HEAD', 'LOOK LEFT', 'LOOK RIGHT'] as const;
+const LIVENESS_CHALLENGES = ['TURN LEFT', 'TURN RIGHT', 'NOD HEAD'] as const;
 type LivenessChallenge = (typeof LIVENESS_CHALLENGES)[number];
 
 type CameraCaptureProps = {
@@ -53,10 +53,11 @@ function CameraCapture({
 
   // Camera flip
   const [cameraFacing, setCameraFacing] = React.useState(CameraType.Front);
+  const [cameraRenderKey, setCameraRenderKey] = React.useState(0);
 
   // Liveness challenge
   const [challengeStep, setChallengeStep] = React.useState<'idle' | 'challenge' | 'done'>('idle');
-  const [challengeType, setChallengeType] = React.useState<LivenessChallenge>('BLINK');
+  const [challengeType, setChallengeType] = React.useState<LivenessChallenge>('TURN LEFT');
   const [challengeCountdown, setChallengeCountdown] = React.useState(0);
 
   React.useEffect(() => {
@@ -96,6 +97,7 @@ function CameraCapture({
 
   const flipCamera = () => {
     setCameraFacing((prev: string) => (prev === CameraType.Front ? CameraType.Back : CameraType.Front));
+    setCameraRenderKey(prev => prev + 1);
   };
 
   const requestPermission = async (): Promise<boolean> => {
@@ -210,8 +212,8 @@ function CameraCapture({
         fileSize: frame2.fileSize,
         faceCentered: faceCount > 0,
         eyesOpen: faceCount > 0,
-        blinkDetected: picked === 'BLINK' ? livenessMotionDetected : captureCount % 2 === 0,
-        headTurnDetected: (picked === 'LOOK LEFT' || picked === 'LOOK RIGHT' || picked === 'NOD YOUR HEAD') ? livenessMotionDetected : captureCount % 2 === 0,
+        blinkDetected: captureCount % 2 === 0,
+        headTurnDetected: livenessMotionDetected,
         brightness: brightnessGuess,
         livenessMotionDetected,
         challengeType: picked,
@@ -309,6 +311,7 @@ function CameraCapture({
     if (permissionState === 'granted') {
       setPreviewVisible(true);
       setCameraState('idle');
+      setCameraRenderKey(prev => prev + 1);
     }
   }, [openPreviewToken, permissionState]);
 
@@ -342,7 +345,12 @@ function CameraCapture({
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>{label}</Text>
-        <Text style={styles.badge}>CAMERA</Text>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.flipHeaderButton} onPress={flipCamera}>
+            <Text style={styles.flipHeaderText}>Flip</Text>
+          </Pressable>
+          <Text style={styles.badge}>CAMERA</Text>
+        </View>
       </View>
 
       <View style={[styles.preview, cameraState === 'failure' && styles.previewFailure]}>
@@ -352,7 +360,7 @@ function CameraCapture({
               ref={cameraRef}
               style={styles.camera}
               cameraType={cameraFacing}
-              key={cameraFacing}
+              key={`${cameraFacing}-${cameraRenderKey}`}
               flashMode="off"
               focusMode="on"
               zoomMode="off"
@@ -443,6 +451,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 10,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  flipHeaderButton: {
+    borderWidth: 1,
+    borderColor: cyberTheme.colors.accentViolet,
+    backgroundColor: '#7B5CF018',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  flipHeaderText: {
+    color: cyberTheme.colors.accentViolet,
+    fontSize: 11,
+    fontWeight: '700',
   },
   title: {
     color: cyberTheme.colors.textPrimary,

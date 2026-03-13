@@ -41,13 +41,13 @@ export const LivenessChecks = {
     }
 
     if (sample.blinkDetected) {
-      score += 0.1;
+      score += 0.05;
     } else {
       reasons.push('Blink not detected');
     }
 
     if (sample.headTurnDetected) {
-      score += 0.1;
+      score += 0.2;
     } else {
       reasons.push('Head movement not detected');
     }
@@ -60,7 +60,7 @@ export const LivenessChecks = {
 
     // Motion between two frames is the strongest liveness signal
     if (sample.livenessMotionDetected) {
-      score += 0.2;
+      score += 0.25;
     } else if (sample.challengeType !== 'NONE') {
       // Challenge was run but no motion → likely a static photo/screen
       score -= 0.2;
@@ -69,7 +69,7 @@ export const LivenessChecks = {
 
     const normalized = Math.min(1, Math.max(0, Number(score.toFixed(2))));
     return {
-      passed: normalized >= 0.55,
+      passed: normalized >= 0.72,
       score: normalized,
       reasons,
     };
