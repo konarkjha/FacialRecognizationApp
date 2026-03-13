@@ -144,6 +144,16 @@ def _landmark_geometry_delta(face1: np.ndarray, face2: np.ndarray) -> float:
     return float(np.mean(np.abs(lm1 - lm2)))
 
 
+def _vector_cosine(a: list[float], b: list[float]) -> float:
+    if not a or not b:
+        return 0.0
+    pairs = min(len(a), len(b))
+    dot = sum(float(a[i]) * float(b[i]) for i in range(pairs))
+    norm_a = float(np.sqrt(sum(float(v) * float(v) for v in a))) or 1e-9
+    norm_b = float(np.sqrt(sum(float(v) * float(v) for v in b))) or 1e-9
+    return float(dot / (norm_a * norm_b))
+
+
 def _compute_liveness_score(image: np.ndarray, face: np.ndarray) -> tuple[float, bool]:
     """
     Passive anti-spoofing: distinguish a live face from a printed photo or
@@ -285,13 +295,45 @@ def check_frame_motion(frame1_base64: str, frame2_base64: str) -> tuple[bool, fl
         geometry_delta = _landmark_geometry_delta(face1, face2)
         geometry_motion = float(np.clip(geometry_delta / 0.05, 0.0, 1.0))
 
-        # Passive texture score from the second frame must also be live-like.
-        texture_score, texture_live = _compute_liveness_score(face_image2, face2)
+        # Passive texture score from both frames must be live-like.
+        texture_score1, texture_live1 = _compute_liveness_score(face_image1, face1)
+        texture_score2, texture_live2 = _compute_liveness_score(face_image2, face2)
 
-        diff_score = round(float(np.clip(0.50 * global_motion + 0.30 * geometry_motion + 0.20 * texture_score, 0.0, 1.0)), 4)
+        # Identity continuity between frame1 and frame2.
+        # If attacker does movement then swaps to another person's photo,
+        # similarity drops and we reject.
+        vector1 = _embed_face(face_image1, face1)
+        vector2 = _embed_face(face_image2, face2)
+        identity_similarity = _vector_cosine(vector1, vector2)
+        identity_score = float(np.clip((identity_similarity - 0.60) / 0.30, 0.0, 1.0))
 
-        # Strict gate: require geometry + global motion + texture-liveness
-        motion_detected = global_motion >= 0.14 and geometry_delta >= 0.008 and texture_live and diff_score >= 0.38
+        diff_score = round(
+            float(
+                np.clip(
+                    0.35 * global_motion
+                    + 0.20 * geometry_motion
+                    + 0.20 * texture_score2
+                    + 0.25 * identity_score,
+                    0.0,
+                    1.0,
+                )
+            ),
+            4,
+        )
+
+        # Strict gate:
+        # - some motion needed but not excessive (excessive usually means scene/photo swap)
+        # - geometry must change (depth cue) but stay in realistic bounds
+        # - both frames must pass passive texture liveness
+        # - identity continuity must hold across frames
+        motion_detected = (
+            0.14 <= global_motion <= 0.78
+            and 0.008 <= geometry_delta <= 0.09
+            and texture_live1
+            and texture_live2
+            and identity_similarity >= 0.82
+            and diff_score >= 0.40
+        )
         return motion_detected, diff_score
 
     except Exception:

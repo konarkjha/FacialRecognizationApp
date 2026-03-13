@@ -164,10 +164,10 @@ function CameraCapture({
       const picked = LIVENESS_CHALLENGES[Math.floor(Math.random() * LIVENESS_CHALLENGES.length)];
       setChallengeType(picked);
       setChallengeStep('challenge');
-      setChallengeCountdown(3);
+      setChallengeCountdown(2);
 
       await new Promise<void>(resolve => {
-        let ticks = 2;
+        let ticks = 1;
         const tick = () => {
           setChallengeCountdown(ticks);
           if (ticks <= 0) {
@@ -181,6 +181,12 @@ function CameraCapture({
       });
 
       setChallengeStep('done');
+
+      // Random short delay makes timed manual face/image swaps harder.
+      const jitterMs = 150 + Math.floor(Math.random() * 300);
+      await new Promise<void>(resolve => {
+        setTimeout(() => resolve(), jitterMs);
+      });
 
       // ── Frame 2 (post-challenge) ───────────────────────────────────────
       const frame2 = await captureToBase64();
