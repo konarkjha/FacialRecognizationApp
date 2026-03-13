@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# Backend data
+backend/data/
+*.sqlite3
+*.sqlite
+
+# Node / React Native
+node_modules/
+mobile/node_modules/
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/build/
+mobile/.expo/
+*.apk
+*.aab
+
+# Misc
+.env
+.DS_Store
+nohup.out
+/tmp/
