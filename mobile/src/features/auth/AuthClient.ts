@@ -34,6 +34,10 @@ export type FaceAnalyzeResponse = {
   is_live: boolean;
 };
 
+export type FaceBatchAnalyzeResponse = {
+  analyses: FaceAnalyzeResponse[];
+};
+
 export type MotionCheckResponse = {
   motion_detected: boolean;
   diff_score: number;
@@ -96,6 +100,12 @@ export const AuthClient = {
     request<FaceAnalyzeResponse>('/auth/analyze-face', {
       method: 'POST',
       body: JSON.stringify({image_base64: imageBase64}),
+    }),
+
+  analyzeFaces: (imagesBase64: string[]) =>
+    request<FaceBatchAnalyzeResponse>('/auth/analyze-face-batch', {
+      method: 'POST',
+      body: JSON.stringify({images_base64: imagesBase64}),
     }),
 
   checkMotion: (frame1Base64: string, frame2Base64: string) =>

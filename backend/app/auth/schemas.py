@@ -52,6 +52,10 @@ class FaceAnalyzeRequest(BaseModel):
     image_base64: str = Field(min_length=32)
 
 
+class FaceBatchAnalyzeRequest(BaseModel):
+    images_base64: list[str] = Field(min_length=1, max_length=5)
+
+
 class MotionCheckRequest(BaseModel):
     frame1_base64: str = Field(min_length=32, description="Baseline frame captured before the challenge")
     frame2_base64: str = Field(min_length=32, description="Frame captured after the liveness challenge")
@@ -71,6 +75,10 @@ class FaceAnalyzeResponse(BaseModel):
     message: str
     liveness_score: float = Field(default=0.5, ge=0.0, le=1.0)
     is_live: bool = True
+
+
+class FaceBatchAnalyzeResponse(BaseModel):
+    analyses: list[FaceAnalyzeResponse]
 
 
 class ChallengeResponse(BaseModel):

@@ -161,25 +161,31 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
   const finalizeFastLogin = async () => {
     const samples = capturedSamplesRef.current;
     const flow = LOGIN_POSE_FLOW;
+    const imagesBase64 = flow.map(pose => {
+      const sample = samples[pose.key];
+      if (!sample?.imageBase64) {
+        throw new Error(`Missing ${pose.label} frame.`);
+      }
+      return sample.imageBase64;
+    });
 
-    setCaptureMeta('Analyzing 3 frames in parallel...');
+    setCaptureMeta('Analyzing 3 frames in one request...');
 
-    const analysisResults = await Promise.all(
-      flow.map(async pose => {
-        const sample = samples[pose.key];
-        if (!sample?.imageBase64) {
-          throw new Error(`Missing ${pose.label} frame.`);
-        }
-        const analysis = await AuthClient.analyzeFace(sample.imageBase64);
-        if (!analysis.face_detected) {
-          throw new Error(`No face detected for ${pose.label} pose. ${analysis.message}`);
-        }
-        if (!analysis.is_live) {
-          throw new Error(`Liveness failed for ${pose.label} pose (score ${analysis.liveness_score.toFixed(2)}).`);
-        }
-        return {pose, sample, analysis};
-      }),
-    );
+    const batchResponse = await AuthClient.analyzeFaces(imagesBase64);
+    if (batchResponse.analyses.length !== flow.length) {
+      throw new Error('Face analysis returned incomplete results. Please try again.');
+    }
+
+    const analysisResults = flow.map((pose, index) => {
+      const analysis = batchResponse.analyses[index];
+      if (!analysis.face_detected) {
+        throw new Error(`No face detected for ${pose.label} pose. ${analysis.message}`);
+      }
+      if (!analysis.is_live) {
+        throw new Error(`Liveness failed for ${pose.label} pose (score ${analysis.liveness_score.toFixed(2)}).`);
+      }
+      return {pose, analysis};
+    });
 
     const frontEmbedding = EmbeddingEngine.fromAnalysis(analysisResults[0].analysis.vector, analysisResults[0].analysis.template_hash);
     const leftEmbedding = EmbeddingEngine.fromAnalysis(analysisResults[1].analysis.vector, analysisResults[1].analysis.template_hash);

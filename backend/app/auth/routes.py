@@ -11,6 +11,8 @@ from .schemas import (
     ChallengeRequest,
     ChallengeResponse,
     ChallengeVerifyRequest,
+    FaceBatchAnalyzeRequest,
+    FaceBatchAnalyzeResponse,
     DeviceEnrollmentRequest,
     EnrollmentStatusResponse,
     FaceAnalyzeRequest,
@@ -86,6 +88,31 @@ def analyze_face(payload: FaceAnalyzeRequest) -> FaceAnalyzeResponse:
         liveness_score=analysis.liveness_score,
         is_live=analysis.is_live,
     )
+
+
+@router.post("/analyze-face-batch", response_model=FaceBatchAnalyzeResponse)
+def analyze_face_batch(payload: FaceBatchAnalyzeRequest) -> FaceBatchAnalyzeResponse:
+    analyses: list[FaceAnalyzeResponse] = []
+
+    for image_base64 in payload.images_base64:
+        try:
+            analysis = analyze_face_image(image_base64)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        analyses.append(
+            FaceAnalyzeResponse(
+                vector=analysis.vector,
+                template_hash=analysis.template_hash,
+                face_detected=analysis.face_detected,
+                confidence=analysis.confidence,
+                message=analysis.message,
+                liveness_score=analysis.liveness_score,
+                is_live=analysis.is_live,
+            )
+        )
+
+    return FaceBatchAnalyzeResponse(analyses=analyses)
 
 
 @router.post("/check-motion", response_model=MotionCheckResponse)
