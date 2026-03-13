@@ -22,6 +22,10 @@ class FaceAnalysis:
 MODEL_DIR = Path(__file__).resolve().parents[2] / "models"
 DETECTOR_MODEL = str(MODEL_DIR / "face_detection_yunet_2023mar.onnx")
 RECOGNIZER_MODEL = str(MODEL_DIR / "face_recognition_sface_2021dec.onnx")
+MAX_INFERENCE_EDGE = 960
+
+# Keep OpenCV memory/thread usage predictable in small Railway containers.
+cv2.setNumThreads(1)
 
 
 @lru_cache(maxsize=1)
@@ -48,6 +52,18 @@ def _decode_base64_image(image_base64: str) -> np.ndarray:
     if image is None:
         raise ValueError("Invalid image data")
     return image
+
+
+def _resize_for_inference(image: np.ndarray, max_edge: int = MAX_INFERENCE_EDGE) -> np.ndarray:
+    height, width = image.shape[:2]
+    longest_edge = max(height, width)
+    if longest_edge <= max_edge:
+        return image
+
+    scale = float(max_edge) / float(longest_edge)
+    new_width = max(1, int(width * scale))
+    new_height = max(1, int(height * scale))
+    return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
 
 def _detect_primary_face(image: np.ndarray) -> tuple[np.ndarray | None, float]:
@@ -113,6 +129,7 @@ def _embed_face(image: np.ndarray, face: np.ndarray) -> list[float]:
 
 def analyze_face_image(image_base64: str) -> FaceAnalysis:
     image = _decode_base64_image(image_base64)
+    image = _resize_for_inference(image)
     face, confidence, face_image = _detect_face_with_fallback(image)
     if face is None:
         return FaceAnalysis(
