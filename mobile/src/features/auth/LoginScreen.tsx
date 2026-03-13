@@ -3,9 +3,8 @@ import {Alert, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native
 
 import {AuthClient} from './AuthClient';
 import CameraCapture from '../face/CameraCapture';
-import {EmbeddingEngine, FaceEmbedding, MultiPoseFaceProfile, PoseKey} from '../face/EmbeddingEngine';
+import {EmbeddingEngine, PoseKey} from '../face/EmbeddingEngine';
 import {FaceCaptureSample} from '../face/LivenessChecks';
-import {MatchService} from '../face/MatchService';
 import {BiometricStore} from '../../security/BiometricStore';
 import {cyberTheme} from '../../theme/cyberTheme';
 
@@ -16,12 +15,10 @@ type LoginScreenProps = {
   onLoginSuccess?: (username: string) => void;
 };
 
-const POSE_FLOW: Array<{key: PoseKey; label: string; instruction: string}> = [
+const LOGIN_POSE_FLOW: Array<{key: PoseKey; label: string; instruction: string}> = [
   {key: 'front', label: 'Front', instruction: 'Look straight at camera'},
   {key: 'left', label: 'Left', instruction: 'Turn face slightly LEFT'},
   {key: 'right', label: 'Right', instruction: 'Turn face slightly RIGHT'},
-  {key: 'up', label: 'Up', instruction: 'Lift chin UP slightly'},
-  {key: 'down', label: 'Down', instruction: 'Lower chin DOWN slightly'},
 ];
 
 function buildAssertion(challengeId: string, nonce: string, bindingKeyId: string): string {
@@ -36,19 +33,19 @@ function buildAssertion(challengeId: string, nonce: string, bindingKeyId: string
 function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
   const [busy, setBusy] = useState(false);
   const [currentPoseIndex, setCurrentPoseIndex] = useState(0);
-  const [poseEmbeddings, setPoseEmbeddings] = useState<Partial<Record<PoseKey, FaceEmbedding>>>({});
+  const [capturedPoseCount, setCapturedPoseCount] = useState(0);
   const [openPreviewToken, setOpenPreviewToken] = useState<number | undefined>(undefined);
   const [captureRequestToken, setCaptureRequestToken] = useState<number | undefined>(undefined);
   const [flipRequestToken, setFlipRequestToken] = useState<number | undefined>(undefined);
-  const [captureMeta, setCaptureMeta] = useState('Tap Start Guided Login, then capture each pose: front, left, right, up, down.');
+  const [captureMeta, setCaptureMeta] = useState('Fast login captures 3 quick angles automatically: front, left, right.');
   const [serverOverallScore, setServerOverallScore] = useState<number | null>(null);
   const [serverRequiredScore, setServerRequiredScore] = useState<number | null>(null);
   const [serverPoseScores, setServerPoseScores] = useState<Partial<Record<PoseKey, number>>>({});
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const captureInFlightRef = useRef(false);
+  const capturedSamplesRef = useRef<Partial<Record<PoseKey, FaceCaptureSample>>>({});
 
-  const currentPose = POSE_FLOW[currentPoseIndex];
-  const allPosesCaptured = POSE_FLOW.every(item => Boolean(poseEmbeddings[item.key]));
+  const currentPose = LOGIN_POSE_FLOW[currentPoseIndex];
 
   const clearAuthTimeout = () => {
     if (!authTimeoutRef.current) {
@@ -58,42 +55,29 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
     authTimeoutRef.current = null;
   };
 
-  const authenticateWithProfile = async (candidateProfile: MultiPoseFaceProfile) => {
+  const authenticateWithProfile = async (candidatePoseVectors: Record<string, number[]>, clientLivenessScore: number) => {
     const binding = await BiometricStore.getDeviceBinding();
-    const enrolledProfile = await BiometricStore.getTemplateProfile();
-    if (!binding || !enrolledProfile) {
+    if (!binding) {
       Alert.alert('Not enrolled', 'Enroll face login on this device first.');
       return;
     }
 
     const challenge = await AuthClient.createChallenge(binding.username, binding.deviceId, 'face-primary');
-    const match = MatchService.compareMultiPose(candidateProfile, enrolledProfile);
-    const candidatePoseVectors = {
-      front: candidateProfile.poses.front.vector,
-      left: candidateProfile.poses.left.vector,
-      right: candidateProfile.poses.right.vector,
-      up: candidateProfile.poses.up.vector,
-      down: candidateProfile.poses.down.vector,
-    };
-
-    if (!match.matched) {
-      setCaptureMeta(`Match score ${match.score.toFixed(1)}%. Need at least 70%.`);
-      throw new Error(`Face mismatch. Match score ${match.score.toFixed(1)}% (required ≥ 70%).`);
-    }
 
     const session = await AuthClient.verifyChallenge(
       challenge.challenge_id,
       binding.username,
       binding.deviceId,
       true,
-      Math.min(1, match.score / 100),
+      clientLivenessScore,
       buildAssertion(challenge.challenge_id, challenge.nonce, binding.bindingKeyId),
       false,
       candidatePoseVectors,
       70,
     );
 
-    const serverOverall = typeof session.match_score === 'number' ? session.match_score : match.score;
+    const fallbackLocalScore = 0;
+    const serverOverall = typeof session.match_score === 'number' ? session.match_score : fallbackLocalScore;
     const required = typeof session.match_required === 'number' ? session.match_required : 70;
     const poseScores = session.pose_scores ?? {};
     const normalizedPoseScores: Partial<Record<PoseKey, number>> = {
@@ -131,8 +115,9 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
       return;
     }
 
-    setPoseEmbeddings({});
+    capturedSamplesRef.current = {};
     setCurrentPoseIndex(0);
+    setCapturedPoseCount(0);
     setServerOverallScore(null);
     setServerRequiredScore(null);
     setServerPoseScores({});
@@ -142,14 +127,15 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
     setCaptureMeta('Opening camera...');
     setOpenPreviewToken(token => (token ?? 0) + 1);
     setTimeout(() => {
-      setCaptureMeta(`Auto capture: ${POSE_FLOW[0].label} pose`);
+      setCaptureMeta(`Fast capture: ${LOGIN_POSE_FLOW[0].label} pose`);
       setCaptureRequestToken(token => (token ?? 0) + 1);
-    }, 1200);
+    }, 800);
   };
 
   const onResetGuidedLogin = () => {
-    setPoseEmbeddings({});
+    capturedSamplesRef.current = {};
     setCurrentPoseIndex(0);
+    setCapturedPoseCount(0);
     setBusy(false);
     setServerOverallScore(null);
     setServerRequiredScore(null);
@@ -157,7 +143,7 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
     setCaptureRequestToken(undefined);
     captureInFlightRef.current = false;
     clearAuthTimeout();
-    setCaptureMeta('Guided login reset. Capture front, left, right, up, and down poses.');
+    setCaptureMeta('Fast login reset. Auto capture will use front, left, and right poses.');
   };
 
   const onFlipCamera = () => {
@@ -172,6 +158,43 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
     setCaptureMeta(message);
   };
 
+  const finalizeFastLogin = async () => {
+    const samples = capturedSamplesRef.current;
+    const flow = LOGIN_POSE_FLOW;
+
+    setCaptureMeta('Analyzing 3 frames in parallel...');
+
+    const analysisResults = await Promise.all(
+      flow.map(async pose => {
+        const sample = samples[pose.key];
+        if (!sample?.imageBase64) {
+          throw new Error(`Missing ${pose.label} frame.`);
+        }
+        const analysis = await AuthClient.analyzeFace(sample.imageBase64);
+        if (!analysis.face_detected) {
+          throw new Error(`No face detected for ${pose.label} pose. ${analysis.message}`);
+        }
+        if (!analysis.is_live) {
+          throw new Error(`Liveness failed for ${pose.label} pose (score ${analysis.liveness_score.toFixed(2)}).`);
+        }
+        return {pose, sample, analysis};
+      }),
+    );
+
+    const frontEmbedding = EmbeddingEngine.fromAnalysis(analysisResults[0].analysis.vector, analysisResults[0].analysis.template_hash);
+    const leftEmbedding = EmbeddingEngine.fromAnalysis(analysisResults[1].analysis.vector, analysisResults[1].analysis.template_hash);
+    const rightEmbedding = EmbeddingEngine.fromAnalysis(analysisResults[2].analysis.vector, analysisResults[2].analysis.template_hash);
+
+    const candidatePoseVectors = {
+      front: frontEmbedding.vector,
+      left: leftEmbedding.vector,
+      right: rightEmbedding.vector,
+    };
+
+    const avgLiveness = analysisResults.reduce((sum, item) => sum + item.analysis.liveness_score, 0) / analysisResults.length;
+    await authenticateWithProfile(candidatePoseVectors, avgLiveness);
+  };
+
   const onCaptureSampleReady = async (sample: FaceCaptureSample) => {
     clearAuthTimeout();
     if (!currentPose || !busy || captureInFlightRef.current) {
@@ -180,45 +203,25 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
     captureInFlightRef.current = true;
 
     if (!sample.imageBase64) {
+      captureInFlightRef.current = false;
       Alert.alert('Capture failed', 'Image capture failed. Please retake this pose.');
       return;
     }
 
-    setBusy(true);
-
     try {
-      const analysis = await AuthClient.analyzeFace(sample.imageBase64);
-      if (!analysis.face_detected) {
-        throw new Error(`No face detected for ${currentPose.label} pose. ${analysis.message}`);
-      }
-      if (!analysis.is_live) {
-        throw new Error(`Liveness failed for ${currentPose.label} pose (score ${analysis.liveness_score.toFixed(2)}).`);
-      }
+      capturedSamplesRef.current = {...capturedSamplesRef.current, [currentPose.key]: sample};
+      setCapturedPoseCount(value => value + 1);
 
-      const embedding = EmbeddingEngine.fromAnalysis(analysis.vector, analysis.template_hash);
-      const nextEmbeddings = {...poseEmbeddings, [currentPose.key]: embedding};
-      setPoseEmbeddings(nextEmbeddings);
-
-      if (currentPoseIndex < POSE_FLOW.length - 1) {
+      if (currentPoseIndex < LOGIN_POSE_FLOW.length - 1) {
         const nextIndex = currentPoseIndex + 1;
         setCurrentPoseIndex(nextIndex);
-        setCaptureMeta(`Captured ${currentPose.label}. Auto capturing: ${POSE_FLOW[nextIndex].label}`);
+        setCaptureMeta(`Captured ${currentPose.label}. Next auto capture: ${LOGIN_POSE_FLOW[nextIndex].label}`);
         setTimeout(() => {
           setCaptureRequestToken(token => (token ?? 0) + 1);
-        }, 650);
+        }, 450);
       } else {
-        const profile: MultiPoseFaceProfile = {
-          poses: {
-            front: nextEmbeddings.front!,
-            left: nextEmbeddings.left!,
-            right: nextEmbeddings.right!,
-            up: nextEmbeddings.up!,
-            down: nextEmbeddings.down!,
-          },
-          capturedAt: new Date().toISOString(),
-        };
-        setCaptureMeta('All poses captured. Verifying profile...');
-        await authenticateWithProfile(profile);
+        setCaptureMeta('Frames captured. Verifying...');
+        await finalizeFastLogin();
         setBusy(false);
       }
     } catch (error) {
@@ -269,7 +272,7 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
         <Text style={styles.poseGuideLabel}>Current login pose</Text>
         <Text style={styles.poseGuideTitle}>{currentPose ? currentPose.label.toUpperCase() : 'DONE'}</Text>
         <Text style={styles.poseGuideHint}>{currentPose ? currentPose.instruction : 'All poses captured'}</Text>
-        <Text style={styles.poseGuideProgress}>{Object.keys(poseEmbeddings).length} / {POSE_FLOW.length} captured</Text>
+        <Text style={styles.poseGuideProgress}>{capturedPoseCount} / {LOGIN_POSE_FLOW.length} captured</Text>
       </View>
 
       {/* ── Status Card ───────────────────────────────────── */}
@@ -285,7 +288,7 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
               Server score {serverOverallScore.toFixed(1)}% (required {(serverRequiredScore ?? 70).toFixed(1)}%)
             </Text>
             <View style={styles.poseScoreRow}>
-              {POSE_FLOW.map(item => {
+              {LOGIN_POSE_FLOW.map(item => {
                 const value = serverPoseScores[item.key];
                 const toneStyle =
                   typeof value !== 'number'
@@ -310,7 +313,7 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
 
       {/* ── Primary Action ────────────────────────────────── */}
       <Pressable style={[styles.primaryButton, busy && styles.buttonDisabled]} onPress={onStartGuidedLogin} disabled={busy}>
-        <Text style={styles.primaryButtonText}>{busy ? 'Auto Capturing...' : 'Start Guided Login'}</Text>
+        <Text style={styles.primaryButtonText}>{busy ? 'Fast Login Running...' : 'Start Fast Login'}</Text>
       </Pressable>
 
       <Pressable style={[styles.resetButton, busy && styles.buttonDisabled]} onPress={onResetGuidedLogin} disabled={busy}>
