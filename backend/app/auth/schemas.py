@@ -86,6 +86,9 @@ class SessionResponse(BaseModel):
     expires_at: datetime
     username: str
     auth_method: str
+    match_score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    match_required: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    pose_scores: Optional[dict[str, float]] = None
 
 
 class EnrollmentStatusResponse(BaseModel):

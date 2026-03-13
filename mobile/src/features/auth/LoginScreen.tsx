@@ -38,6 +38,7 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
   const [currentPoseIndex, setCurrentPoseIndex] = useState(0);
   const [poseEmbeddings, setPoseEmbeddings] = useState<Partial<Record<PoseKey, FaceEmbedding>>>({});
   const [captureMeta, setCaptureMeta] = useState('Tap Start Guided Login, then capture each pose: front, left, right, up, down.');
+  const [serverScoreSummary, setServerScoreSummary] = useState<string>('');
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentPose = POSE_FLOW[currentPoseIndex];
@@ -86,8 +87,27 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
       70,
     );
 
-    setCaptureMeta(`Face recognized. Match score ${match.score.toFixed(1)}% as ${session.username}.`);
-    Alert.alert('Face login success', `Authenticated as ${session.username} via ${session.auth_method}.`);
+    const serverOverall = typeof session.match_score === 'number' ? session.match_score : match.score;
+    const required = typeof session.match_required === 'number' ? session.match_required : 70;
+    const poseScores = session.pose_scores ?? {};
+    const poseOrder: Array<{key: string; label: string}> = [
+      {key: 'front', label: 'Front'},
+      {key: 'left', label: 'Left'},
+      {key: 'right', label: 'Right'},
+      {key: 'up', label: 'Up'},
+      {key: 'down', label: 'Down'},
+    ];
+    const breakdown = poseOrder
+      .filter(item => typeof poseScores[item.key] === 'number')
+      .map(item => `${item.label}: ${poseScores[item.key].toFixed(1)}%`)
+      .join(' • ');
+
+    setServerScoreSummary(`Server score ${serverOverall.toFixed(1)}% (required ${required.toFixed(1)}%)${breakdown ? `\n${breakdown}` : ''}`);
+    setCaptureMeta(`Face recognized. Server score ${serverOverall.toFixed(1)}% as ${session.username}.`);
+    Alert.alert(
+      'Face login success',
+      `Authenticated as ${session.username} via ${session.auth_method}.\n\nServer score: ${serverOverall.toFixed(1)}% (required ${required.toFixed(1)}%)${breakdown ? `\n${breakdown}` : ''}`,
+    );
     onLoginSuccess?.(session.username);
   };
 
@@ -206,6 +226,7 @@ function LoginScreen({onGoEnroll, onGoLive, onLoginSuccess}: LoginScreenProps) {
           <Text style={styles.statusLabel}>Status</Text>
         </View>
         <Text style={styles.captureMeta}>{captureMeta}</Text>
+        {serverScoreSummary ? <Text style={styles.serverScoreText}>{serverScoreSummary}</Text> : null}
       </View>
 
       {/* ── Primary Action ────────────────────────────────── */}
@@ -376,6 +397,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     lineHeight: 20,
     fontSize: 13,
+  },
+  serverScoreText: {
+    color: cyberTheme.colors.accentGold,
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
   },
   poseGuideCard: {
     backgroundColor: cyberTheme.colors.surfaceHigh,

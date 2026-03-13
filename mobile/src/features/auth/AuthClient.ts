@@ -13,6 +13,9 @@ export type SessionResponse = {
   expires_at: string;
   username: string;
   auth_method: string;
+  match_score?: number;
+  match_required?: number;
+  pose_scores?: Record<string, number>;
 };
 
 export type EnrollmentStatusResponse = {

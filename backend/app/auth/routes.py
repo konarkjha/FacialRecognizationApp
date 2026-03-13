@@ -47,9 +47,10 @@ def _mean_abs_distance(a: list[float], b: list[float]) -> float:
     return sum(abs(float(a[i]) - float(b[i])) for i in range(pairs)) / float(pairs)
 
 
-def _compute_multi_pose_score(candidate: dict[str, list[float]], enrolled: dict[str, list[float]]) -> float:
+def _compute_multi_pose_score(candidate: dict[str, list[float]], enrolled: dict[str, list[float]]) -> tuple[float, dict[str, float]]:
     total = 0.0
     count = 0
+    pose_scores: dict[str, float] = {}
     for key in POSE_KEYS:
         c = candidate.get(key)
         e = enrolled.get(key)
@@ -60,12 +61,13 @@ def _compute_multi_pose_score(candidate: dict[str, list[float]], enrolled: dict[
         sim_score = max(0.0, min(1.0, (similarity - 0.50) / 0.40))
         dist_penalty = max(0.0, min(1.0, (distance - 0.04) / 0.07))
         pose_score = max(0.0, min(1.0, sim_score * (1.0 - 0.45 * dist_penalty)))
+        pose_scores[key] = round(pose_score * 100.0, 2)
         total += pose_score
         count += 1
 
     if count == 0:
-        return 0.0
-    return round((total / float(count)) * 100.0, 2)
+        return 0.0, pose_scores
+    return round((total / float(count)) * 100.0, 2), pose_scores
 
 
 @router.post("/analyze-face", response_model=FaceAnalyzeResponse)
@@ -224,8 +226,10 @@ def verify_face_login(payload: ChallengeVerifyRequest) -> SessionResponse:
         raise HTTPException(status_code=404, detail="Challenge not found")
 
     server_face_match = payload.face_match
+    score: float | None = None
+    pose_scores: dict[str, float] | None = None
     if payload.candidate_pose_vectors and device.face_vectors:
-        score = _compute_multi_pose_score(payload.candidate_pose_vectors, device.face_vectors)
+        score, pose_scores = _compute_multi_pose_score(payload.candidate_pose_vectors, device.face_vectors)
         server_face_match = score >= payload.minimum_match_score
 
     verified = verify_challenge_response(
@@ -249,4 +253,7 @@ def verify_face_login(payload: ChallengeVerifyRequest) -> SessionResponse:
         expires_at=session.expires_at,
         username=session.username,
         auth_method=session.auth_method,
+        match_score=score,
+        match_required=payload.minimum_match_score if score is not None else None,
+        pose_scores=pose_scores,
     )
