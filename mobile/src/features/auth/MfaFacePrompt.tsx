@@ -1,7 +1,7 @@
 import React, {useState} from 'react';
 import {Alert, Pressable, ScrollView, StyleSheet, Text} from 'react-native';
 
-import CameraCapture from '@/features/face/CameraCapture';
+import CameraCapture from '../face/CameraCapture';
 import {AuthClient} from './AuthClient';
 import {BiometricStore} from '../../security/BiometricStore';
 import {EmbeddingEngine} from '../face/EmbeddingEngine';
